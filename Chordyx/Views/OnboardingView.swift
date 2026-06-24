@@ -112,8 +112,8 @@ struct OnboardingView: View {
     private var networkPage: some View {
         onboardingPage(
             icon: "wifi",
-            title: "Stay Nearby",
-            message: "Keep Wi‑Fi and Bluetooth on. Chordyx finds nearby sessions automatically — no internet required."
+            title: "Ready for Sunday",
+            message: "Use the same Wi‑Fi as your band. Allow Local Network access when prompted. Run the pre-service checklist before going live."
         )
     }
 

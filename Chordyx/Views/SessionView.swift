@@ -648,7 +648,8 @@ struct SessionView: View {
                 if !viewModel.payload.backingTrackDisplayName.isEmpty {
                     BackingTrackStatusBanner(
                         title: viewModel.payload.backingTrackDisplayName,
-                        isPlaying: viewModel.payload.isBackingTrackPlaying
+                        isPlaying: viewModel.payload.isBackingTrackPlaying,
+                        isGuestView: isGuest
                     )
                     .padding(.horizontal, sessionHorizontalPadding)
                     .padding(.top, 4)
@@ -886,7 +887,7 @@ struct SessionView: View {
                         .lineLimit(1)
 
                     HStack(spacing: 6) {
-                        if isGuest, let host = viewModel.sessionManager.connectedPeers.first?.displayName {
+                        if isGuest, let host = viewModel.sessionManager.hostPeerDisplayName {
                             Text("Following \(host)")
                         } else {
                             Label(
@@ -924,10 +925,20 @@ struct SessionView: View {
                 Text(viewModel.payload.sessionName)
                     .font(.headline.weight(.bold))
                     .lineLimit(1)
-                if isGuest, let host = viewModel.sessionManager.connectedPeers.first?.displayName {
-                    Text("Following \(host)")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.textSecondary)
+                if isGuest {
+                    if let host = viewModel.sessionManager.hostPeerDisplayName {
+                        Text("Following \(host)")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    LiveSessionStatusBar(
+                        isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
+                        isVampActive: viewModel.payload.isVampActive,
+                        tempoBPM: viewModel.payload.tempoBPM,
+                        isMetronomePlaying: viewModel.payload.isMetronomePlaying,
+                        syncQuality: viewModel.sessionManager.syncQuality,
+                        showSyncQuality: true
+                    )
                 } else if isLivePerformance {
                     LiveSessionStatusBar(
                         isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,

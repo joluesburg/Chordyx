@@ -126,9 +126,16 @@ struct LiveSessionStatusBar: View {
     let isVampActive: Bool
     let tempoBPM: Double
     let isMetronomePlaying: Bool
+    var syncQuality: SyncQuality = .unknown
+    var showSyncQuality: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
+            if showSyncQuality, syncQuality == .poor || syncQuality == .fair {
+                Label(syncQuality.label, systemImage: "wifi.exclamationmark")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(syncQuality == .poor ? .orange : AppTheme.textSecondary)
+            }
             if isMetronomePlaying {
                 Label("\(Int(tempoBPM)) BPM", systemImage: "metronome")
                     .font(.caption2.weight(.semibold))
@@ -292,6 +299,7 @@ struct LiveSetlistControlBar: View {
 struct BackingTrackStatusBanner: View {
     let title: String
     let isPlaying: Bool
+    var isGuestView: Bool = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -306,10 +314,17 @@ struct BackingTrackStatusBanner: View {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+                if isGuestView {
+                    Text(String(localized: "Audio on host device only"))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
             }
             Spacer()
             if isPlaying {
-                Text(String(localized: "Playing"))
+                Text(isGuestView
+                     ? String(localized: "Host playing")
+                     : String(localized: "Playing"))
                     .font(.caption.weight(.bold))
                     .foregroundStyle(AppTheme.accent)
             }

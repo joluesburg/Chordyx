@@ -27,6 +27,8 @@ final class SessionViewModel {
     private var transitionTask: Task<Void, Never>?
     private var cueClearTask: Task<Void, Never>?
     private var songEndingTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private var midiSyncTask: Task<Void, Never>?
     var autoAdvanceSetlistSongs = false
     var shouldAutoAdvanceSetlist = false
 
@@ -281,10 +283,18 @@ final class SessionViewModel {
             guard let self else { return }
             if self.role == .host {
                 self.sync()
+                if !peers.isEmpty {
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        guard let self, self.role == .host, !self.sessionManager.connectedPeers.isEmpty else { return }
+                        self.sync()
+                    }
+                }
             } else if self.role == .guest, !peers.isEmpty {
                 if let hostName = peers.first?.displayName, !hostName.isEmpty {
                     self.connectedHostDeviceName = hostName
                 }
+                self.stopReconnectPolling()
                 self.showReconnectBanner = false
                 self.pendingReconnectRecord = nil
             }
@@ -390,7 +400,16 @@ final class SessionViewModel {
         guard canDriveSession else { return }
         payload.pianoNotes = indices
         updateFreestyleRecognition(from: indices)
-        sync()
+        scheduleMIDISync()
+    }
+
+    private func scheduleMIDISync() {
+        midiSyncTask?.cancel()
+        midiSyncTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled, let self else { return }
+            self.sync()
+        }
     }
 
     private func updateFreestyleRecognition(from indices: [Int]) {
@@ -690,7 +709,8 @@ final class SessionViewModel {
     }
 
     private func pauseBackingTrackForSongChange() {
-        backingTrack.stop()
+        backingTrack.clear()
+        payload.backingTrackDisplayName = ""
         payload.isBackingTrackPlaying = false
     }
 
@@ -779,12 +799,25 @@ final class SessionViewModel {
         newPayload.isLoopEnabled = cleaned.isLoopEnabled
         newPayload.rehearsalNotes = cleaned.rehearsalNotes
         newPayload.sessionToken = preserveSessionToken ? payload.sessionToken : UUID()
-        newPayload.displayMode = preferredDisplayMode(
-            chordCount: sortedChords.count,
-            sectionCount: cleaned.sections.count,
-            hasLyrics: !cleaned.lyricsLines.isEmpty
-        )
-        backingTrack.stop()
+        if preserveSessionToken {
+            newPayload.performanceMode = payload.performanceMode
+            newPayload.displayMode = payload.displayMode
+            newPayload.autoAdvanceSetlist = payload.autoAdvanceSetlist
+            newPayload.showBeatSyncHints = payload.showBeatSyncHints
+        } else {
+            newPayload.displayMode = preferredDisplayMode(
+                chordCount: sortedChords.count,
+                sectionCount: cleaned.sections.count,
+                hasLyrics: !cleaned.lyricsLines.isEmpty
+            )
+        }
+        newPayload.isAutoAdvancePaused = false
+        newPayload.isVampActive = false
+        newPayload.activeCue = nil
+        newPayload.isSongEnding = false
+        newPayload.backingTrackDisplayName = ""
+        newPayload.isBackingTrackPlaying = false
+        backingTrack.clear()
         payload = newPayload
         updateActiveSection()
         applyMetronome()
@@ -861,10 +894,12 @@ final class SessionViewModel {
 
     func attemptReconnect(to record: RecentSessionRecord) {
         pendingReconnectRecord = record
+        connectedHostDeviceName = record.hostDeviceName
         showReconnectBanner = true
         role = .guest
         isPracticeMode = false
         sessionManager.startBrowsing()
+        startReconnectPolling()
     }
 
     func tryAutoReconnectIfPossible() {
@@ -895,6 +930,23 @@ final class SessionViewModel {
             progressionName: payload.sessionName
         )
         sessionManager.startBrowsing()
+        startReconnectPolling()
+    }
+
+    private func startReconnectPolling() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            for _ in 0..<72 {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, let self, self.showReconnectBanner else { return }
+                self.tryAutoReconnectIfPossible()
+            }
+        }
+    }
+
+    private func stopReconnectPolling() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
     }
 
     private func beginHostingSession(named name: String) {
@@ -1431,22 +1483,23 @@ final class SessionViewModel {
            let startChord = sorted.first(where: { $0.id == loopStart }) {
             payload.activeChordID = startChord.id
         } else if index + 1 >= sorted.count {
+            payload.activeChordID = sorted[index].id
             if autoAdvanceSetlistSongs, activeSetlist != nil {
-                payload.activeChordID = sorted[index].id
+                shouldAutoAdvanceSetlist = true
             } else {
-                payload.activeChordID = sorted[0].id
+                signalSongEndingIfNeeded()
             }
-            signalSongEndingIfNeeded()
         } else {
             payload.activeChordID = sorted[index + 1].id
         }
         payload.beatsOnActiveChord = 0
         updateActiveSection()
         sync()
+    }
 
-        if index + 1 >= sorted.count, autoAdvanceSetlistSongs, activeSetlist != nil {
-            // Song finished — host should call nextSetlistSong from UI/timer
-        }
+    private func isOnLastChord(_ chordID: UUID?) -> Bool {
+        guard let chordID, let last = sortedChords.last else { return false }
+        return chordID == last.id
     }
 
     private func signalSongEndingIfNeeded() {
@@ -1482,7 +1535,12 @@ final class SessionViewModel {
                 payload.activeChordID = sectionChords[0].id
             }
         } else {
-            payload.activeChordID = sectionChords[0].id
+            payload.activeChordID = sectionChords[index].id
+            if autoAdvanceSetlistSongs, activeSetlist != nil, isOnLastChord(sectionChords[index].id) {
+                shouldAutoAdvanceSetlist = true
+            } else {
+                signalSongEndingIfNeeded()
+            }
         }
         payload.beatsOnActiveChord = 0
         updateActiveSection()
@@ -1539,6 +1597,11 @@ final class SessionViewModel {
         cueClearTask = nil
         songEndingTask?.cancel()
         songEndingTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        midiSyncTask?.cancel()
+        midiSyncTask = nil
+        stopReconnectPolling()
         showReconnectBanner = false
         pendingReconnectRecord = nil
         connectedHostDeviceName = ""

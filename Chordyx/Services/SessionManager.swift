@@ -36,6 +36,11 @@ final class SessionManager: NSObject {
     var syncQuality: SyncQuality = .unknown
 
     var clockOffset: Double = 0
+    private(set) var hostPeer: MCPeerID?
+
+    var hostPeerDisplayName: String? {
+        hostPeer?.displayName ?? connectedPeers.first?.displayName
+    }
 
     private var myPeerID = MCPeerID(displayName: PlatformDevice.defaultDisplayName)
     private var session: MCSession?
@@ -179,6 +184,7 @@ final class SessionManager: NSObject {
     }
 
     func joinHost(_ host: DiscoveredHost) {
+        hostPeer = host.peer
         guard let browser, let session else { return }
         browser.invitePeer(host.peer, to: session, withContext: nil, timeout: 20)
     }
@@ -201,7 +207,7 @@ final class SessionManager: NSObject {
     }
 
     func sendControlRequest(_ action: SessionControlAction) {
-        guard !isHost, let session, let host = session.connectedPeers.first else { return }
+        guard !isHost, let session, let host = resolvedHostPeer(in: session) else { return }
         send(.controlRequest(action), to: [host], mode: .reliable)
     }
 
@@ -211,7 +217,7 @@ final class SessionManager: NSObject {
     }
 
     func disconnect() {
-        stopAll()
+        stopAll(clearHostPeer: true)
         hostingSessionName = nil
         connectionState = .idle
         connectedPeers = []
@@ -235,7 +241,7 @@ final class SessionManager: NSObject {
     }
 
     private func calibrateOnce() async {
-        guard !isHost, let host = session?.connectedPeers.first else { return }
+        guard !isHost, let session, let host = resolvedHostPeer(in: session) else { return }
         bestRoundTrip = .infinity
         for _ in 0..<7 {
             guard !Task.isCancelled else { return }
@@ -243,6 +249,14 @@ final class SessionManager: NSObject {
             send(.timeSyncRequest(ping), to: [host], mode: .unreliable)
             try? await Task.sleep(for: .milliseconds(120))
         }
+    }
+
+    private func resolvedHostPeer(in session: MCSession) -> MCPeerID? {
+        if let hostPeer,
+           let match = session.connectedPeers.first(where: { $0.displayName == hostPeer.displayName }) {
+            return match
+        }
+        return session.connectedPeers.first
     }
 
     private func send(_ message: SessionMessage, to peers: [MCPeerID], mode: MCSessionSendDataMode) {
@@ -275,7 +289,7 @@ final class SessionManager: NSObject {
         pendingInvitations = [:]
     }
 
-    private func stopAll() {
+    private func stopAll(clearHostPeer: Bool = false) {
         calibrationTask?.cancel()
         calibrationTask = nil
         rejectAllPendingInvitations()
@@ -286,6 +300,9 @@ final class SessionManager: NSObject {
         session?.disconnect()
         session = nil
         isHost = false
+        if clearHostPeer {
+            hostPeer = nil
+        }
     }
 }
 
