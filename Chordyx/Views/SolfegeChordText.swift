@@ -74,12 +74,20 @@ extension ChordEntry {
     func chordText(
         for notation: ChordNotation,
         key: MusicalKey = .C,
+        transposeSemitones: Int = 0,
+        capoFret: Int = 0,
         size: CGFloat,
         weight: Font.Weight = .bold,
         design: Font.Design = .rounded
     ) -> Text {
         SolfegeChordText.make(
-            displayName(for: notation, key: key),
+            ChordDisplayHelper.displayName(
+                for: self,
+                notation: notation,
+                songKey: key,
+                transposeSemitones: transposeSemitones,
+                capoFret: capoFret
+            ),
             notation: notation,
             size: size,
             weight: weight,

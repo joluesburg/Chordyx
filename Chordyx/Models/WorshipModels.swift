@@ -196,9 +196,6 @@ enum ChordDisplayHelper {
         let shiftedKey = MusicalKey.allCases.first {
             $0.pitchClass == ((songKey.pitchClass + totalShift) % 12 + 12) % 12
         } ?? songKey
-        if notation == .nashville {
-            return chord.displayName(for: .nashville, key: songKey)
-        }
         let shiftedSymbol = Transposer.transpose(
             symbol: chord.symbolName,
             by: totalShift,

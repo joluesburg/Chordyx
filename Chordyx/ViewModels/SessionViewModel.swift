@@ -38,6 +38,7 @@ final class SessionViewModel {
     var importSessionGuide: ImportSessionGuide?
     var pendingReconnectRecord: RecentSessionRecord?
     var showReconnectBanner = false
+    private var connectedHostDeviceName = ""
 
     static let minBPM: Double = 40
     static let maxBPM: Double = 240
@@ -281,6 +282,9 @@ final class SessionViewModel {
             if self.role == .host {
                 self.sync()
             } else if self.role == .guest, !peers.isEmpty {
+                if let hostName = peers.first?.displayName, !hostName.isEmpty {
+                    self.connectedHostDeviceName = hostName
+                }
                 self.showReconnectBanner = false
                 self.pendingReconnectRecord = nil
             }
@@ -874,9 +878,12 @@ final class SessionViewModel {
     private func handleGuestDisconnected() {
         guard role == .guest, isInSession else { return }
         showReconnectBanner = true
+        let hostName = connectedHostDeviceName.isEmpty
+            ? RecentSessionStore.records.first(where: { $0.sessionToken == payload.sessionToken })?.hostDeviceName ?? ""
+            : connectedHostDeviceName
         pendingReconnectRecord = RecentSessionRecord(
             sessionName: payload.sessionName,
-            hostDeviceName: sessionManager.connectedPeers.first?.displayName ?? "",
+            hostDeviceName: hostName,
             sessionToken: payload.sessionToken,
             key: payload.key,
             lastActiveChordID: payload.activeChordID,
@@ -1113,6 +1120,7 @@ final class SessionViewModel {
     func join(host: DiscoveredHost) {
         isPracticeMode = false
         role = .guest
+        connectedHostDeviceName = host.peer.displayName
         sessionManager.joinHost(host)
         isInSession = true
         showReconnectBanner = false
@@ -1533,6 +1541,7 @@ final class SessionViewModel {
         songEndingTask = nil
         showReconnectBanner = false
         pendingReconnectRecord = nil
+        connectedHostDeviceName = ""
         if !isPracticeMode {
             sessionManager.disconnect()
         }

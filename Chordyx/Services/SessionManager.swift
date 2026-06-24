@@ -87,7 +87,7 @@ final class SessionManager: NSObject {
         hostingKey = key
         hostingTempoBPM = tempoBPM
         hostingSessionToken = sessionToken
-        beginHosting(sessionName: sessionName)
+        refreshAdvertiserDiscoveryInfo(sessionName: sessionName)
     }
 
     func startBrowsing() {
@@ -101,12 +101,42 @@ final class SessionManager: NSObject {
     /// Re-publish the host on macOS if Bonjour advertising was interrupted.
     func refreshHostingIfNeeded() {
         guard isHost, let sessionName = hostingSessionName else { return }
-        if advertiser == nil {
-            beginHosting(sessionName: sessionName)
+        if session != nil {
+            if advertiser == nil {
+                refreshAdvertiserDiscoveryInfo(sessionName: sessionName)
+            } else {
+                advertiser?.stopAdvertisingPeer()
+                advertiser?.startAdvertisingPeer()
+            }
             return
         }
+        beginHosting(sessionName: sessionName)
+    }
+
+    private func refreshAdvertiserDiscoveryInfo(sessionName: String) {
+        guard isHost, session != nil else { return }
         advertiser?.stopAdvertisingPeer()
+        advertiser = nil
+
+        let discoveryInfo = [
+            "sessionName": sessionName,
+            "key": hostingKey.rawValue,
+            "tempo": "\(hostingTempoBPM)",
+            "sessionToken": hostingSessionToken.uuidString
+        ]
+        advertiser = MCNearbyServiceAdvertiser(
+            peer: myPeerID,
+            discoveryInfo: discoveryInfo,
+            serviceType: Self.serviceType
+        )
+        advertiser?.delegate = self
         advertiser?.startAdvertisingPeer()
+
+        if let session, !session.connectedPeers.isEmpty {
+            connectionState = .connected(peerCount: session.connectedPeers.count)
+        } else {
+            connectionState = .hosting
+        }
     }
 
     private func beginHosting(sessionName: String) {

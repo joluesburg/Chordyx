@@ -814,6 +814,8 @@ struct SessionView: View {
                         chords: ringChords,
                         notation: ringNotation,
                         key: viewModel.payload.key,
+                        transposeSemitones: isGuest ? guestTranspose : 0,
+                        capoFret: isGuest ? guestCapo : 0,
                         activeChordID: ringShowsLiveChords ? nil : viewModel.payload.activeChordID,
                         activeChordSymbol: ringShowsLiveChords
                             ? viewModel.payload.liveChordSymbol
@@ -833,6 +835,8 @@ struct SessionView: View {
                             : viewModel.upcomingChord,
                         notation: ringNotation,
                         key: viewModel.payload.key,
+                        transposeSemitones: isGuest ? guestTranspose : 0,
+                        capoFret: isGuest ? guestCapo : 0,
                         emphasized: isGuest,
                         isEmptyProgression: isHost
                             && viewModel.sortedChords.isEmpty

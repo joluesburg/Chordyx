@@ -9,6 +9,8 @@ struct ChordRingView: View {
     let chords: [ChordEntry]
     let notation: ChordNotation
     let key: MusicalKey
+    var transposeSemitones: Int = 0
+    var capoFret: Int = 0
     let activeChordID: UUID?
     var activeChordSymbol: String? = nil
     let isInteractive: Bool
@@ -51,7 +53,13 @@ struct ChordRingView: View {
                     ?? (chord.id == activeChordID)
 
                 ChordBubble(
-                    label: chord.displayName(for: notation, key: key),
+                    label: ChordDisplayHelper.displayName(
+                        for: chord,
+                        notation: notation,
+                        songKey: key,
+                        transposeSemitones: transposeSemitones,
+                        capoFret: capoFret
+                    ),
                     notation: notation,
                     order: index + 1,
                     isActive: isActive,
@@ -143,6 +151,8 @@ struct CurrentChordDisplay: View {
     var upcoming: ChordEntry? = nil
     let notation: ChordNotation
     let key: MusicalKey
+    var transposeSemitones: Int = 0
+    var capoFret: Int = 0
     var emphasized: Bool = false
     var isEmptyProgression: Bool = false
     var onAddChords: (() -> Void)? = nil
@@ -163,6 +173,14 @@ struct CurrentChordDisplay: View {
 
     private var centerGradientEndRadius: CGFloat {
         effectiveDiameter * 0.48
+    }
+
+    private var displayKey: MusicalKey {
+        let totalShift = transposeSemitones + capoFret
+        guard totalShift != 0 else { return key }
+        return MusicalKey.allCases.first {
+            $0.pitchClass == ((key.pitchClass + totalShift) % 12 + 12) % 12
+        } ?? key
     }
 
     var body: some View {
@@ -200,7 +218,13 @@ struct CurrentChordDisplay: View {
                         .textCase(.uppercase)
                         .tracking(1.2)
 
-                    chord.chordText(for: notation, key: key, size: chordFontSize)
+                    chord.chordText(
+                        for: notation,
+                        key: key,
+                        transposeSemitones: transposeSemitones,
+                        capoFret: capoFret,
+                        size: chordFontSize
+                    )
                         .foregroundStyle(AppTheme.accent)
                         .minimumScaleFactor(0.4)
                         .lineLimit(1)
@@ -212,7 +236,14 @@ struct CurrentChordDisplay: View {
                                 .font(.caption2.weight(.bold))
                             Text("then")
                                 .font(.caption.weight(.semibold))
-                            upcoming.chordText(for: notation, key: key, size: 13, weight: .semibold)
+                            upcoming.chordText(
+                                for: notation,
+                                key: key,
+                                transposeSemitones: transposeSemitones,
+                                capoFret: capoFret,
+                                size: 13,
+                                weight: .semibold
+                            )
                                 .lineLimit(1)
                         }
                         .foregroundStyle(AppTheme.accentSecondary)
@@ -221,7 +252,7 @@ struct CurrentChordDisplay: View {
                         .background(AppTheme.surface.opacity(0.7))
                         .clipShape(Capsule())
                     } else {
-                        Text("Key of \(key.displayName)")
+                        Text("Key of \(displayKey.displayName)")
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(AppTheme.textSecondary)
                     }
