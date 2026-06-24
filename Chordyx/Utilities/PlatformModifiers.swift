@@ -271,6 +271,88 @@ extension View {
     /// Library flows use the full window on Mac/iPad when presented from home.
     @ViewBuilder
     func platformLibrarySheetFrame() -> some View {
-        self
+        modifier(PlatformLibrarySheetFrameModifier())
+    }
+
+    /// Wider readable width for home-style menus on iPad and Mac.
+    @ViewBuilder
+    func platformHomeContentWidth() -> some View {
+        modifier(PlatformHomeContentWidthModifier())
+    }
+}
+
+private struct PlatformLibrarySheetFrameModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+            .frame(minWidth: 540, idealWidth: 680, maxWidth: 820, minHeight: 520)
+        #elseif os(iOS)
+        if horizontalSizeClass == .regular {
+            content
+                .frame(minWidth: 480, idealWidth: 620, maxWidth: 760, minHeight: 520)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct PlatformHomeContentWidthModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: PlatformLayout.homeContentMaxWidth(horizontalSizeClass: horizontalSizeClass))
+            .frame(maxWidth: .infinity)
+    }
+}
+
+enum PlatformLayout {
+    static func homeContentMaxWidth(horizontalSizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        #if os(macOS)
+        1180
+        #else
+        horizontalSizeClass == .regular ? 920 : .infinity
+        #endif
+    }
+
+    static func homeHorizontalPadding(horizontalSizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        #if os(macOS)
+        48
+        #else
+        horizontalSizeClass == .regular ? 48 : 24
+        #endif
+    }
+
+    static func usesWideHomeLayout(horizontalSizeClass: UserInterfaceSizeClass?) -> Bool {
+        usesWideSessionLayout(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    static func usesWideSessionLayout(horizontalSizeClass: UserInterfaceSizeClass?) -> Bool {
+        #if os(macOS)
+        true
+        #else
+        horizontalSizeClass == .regular
+        #endif
+    }
+
+    static func sessionPanelMaxWidth(horizontalSizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        #if os(macOS)
+        1020
+        #else
+        horizontalSizeClass == .regular ? 860 : .infinity
+        #endif
+    }
+
+    static func sessionHorizontalPadding(horizontalSizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        #if os(macOS)
+        40
+        #else
+        horizontalSizeClass == .regular ? 40 : 20
+        #endif
     }
 }

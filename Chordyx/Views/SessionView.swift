@@ -100,13 +100,20 @@ struct SessionView: View {
         return horizontalSizeClass == .regular ? base + 14 : base
     }
 
-    /// Keep session controls iPhone-sized on iPad instead of stretching edge to edge.
+    private var usesWideSessionLayout: Bool {
+        PlatformLayout.usesWideSessionLayout(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    private var usesWideLiveCompactDeck: Bool {
+        usesWideSessionLayout && isLiveCompactHost
+    }
+
     private var sessionPanelMaxWidth: CGFloat {
-        horizontalSizeClass == .regular ? 400 : .infinity
+        PlatformLayout.sessionPanelMaxWidth(horizontalSizeClass: horizontalSizeClass)
     }
 
     private var sessionHorizontalPadding: CGFloat {
-        horizontalSizeClass == .regular ? 24 : 20
+        PlatformLayout.sessionHorizontalPadding(horizontalSizeClass: horizontalSizeClass)
     }
 
     private func maxBottomPanelHeight(for viewportHeight: CGFloat) -> CGFloat {
@@ -117,8 +124,14 @@ struct SessionView: View {
         }
         #endif
         let fraction: CGFloat
-        if horizontalSizeClass == .regular {
-            fraction = isRingHero ? 0.28 : 0.36
+        if usesWideSessionLayout {
+            if isHost && isLivePerformance && !liveToolsExpanded {
+                fraction = verticalSizeClass == .compact ? 0.34 : 0.38
+            } else if isRingHero {
+                fraction = isGuest ? 0.30 : 0.28
+            } else {
+                fraction = 0.36
+            }
         } else if isGuest {
             if isRingHero {
                 fraction = verticalSizeClass == .compact ? 0.36 : 0.32
@@ -717,20 +730,11 @@ struct SessionView: View {
             if let guide = viewModel.importSessionGuide {
                 importSessionGuideBanner(guide)
             }
-
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    NotationCycleButton(viewModel: viewModel, isGuest: isGuest)
-                }
+        }
+        .overlay(alignment: usesWideSessionLayout ? .topTrailing : .bottomTrailing) {
+            NotationCycleButton(viewModel: viewModel, isGuest: isGuest)
                 .padding(.trailing, sessionHorizontalPadding)
-                .padding(.bottom, 8)
-                // Match the centered session panel on iPad/Mac so the button sits above the control grid.
-                .frame(maxWidth: sessionPanelMaxWidth)
-                .frame(maxWidth: .infinity)
-            }
-            .allowsHitTesting(true)
+                .padding(usesWideSessionLayout ? .top : .bottom, 8)
         }
     }
 
@@ -962,37 +966,42 @@ struct SessionView: View {
     private func bottomPanel(maxHeight: CGFloat) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
-                if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
-                    ChordAdvanceBar(viewModel: viewModel)
-                        .padding(.horizontal, sessionHorizontalPadding)
-                        .padding(.top, 8)
-                }
-
-                if isHost || isPractice, !viewModel.payload.isLiveChordsOnly, !isLiveCompactHost {
-                    PerformanceModePicker(viewModel: viewModel)
-                        .padding(.horizontal, sessionHorizontalPadding)
-                        .padding(.vertical, 8)
-                    SessionDisplayModePicker(viewModel: viewModel)
-                        .padding(.horizontal, sessionHorizontalPadding)
-                        .padding(.bottom, 8)
-                }
-
-                if metronomePanelVisible {
-                    metronomeBar
+                if usesWideLiveCompactDeck {
+                    wideLiveCompactHostPanelContent
+                        .frame(minHeight: maxHeight, alignment: .center)
                 } else {
-                    collapsedMetronomeBar
-                }
+                    if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
+                        ChordAdvanceBar(viewModel: viewModel)
+                            .padding(.horizontal, sessionHorizontalPadding)
+                            .padding(.top, 8)
+                    }
 
-                if isLiveCompactHost {
-                    liveCompactHostPanel
-                } else if isHost {
-                    hostControls
-                } else if isGuest {
-                    #if os(macOS)
-                    macGuestControls
-                    #else
-                    guestBanner
-                    #endif
+                    if isHost || isPractice, !viewModel.payload.isLiveChordsOnly, !isLiveCompactHost {
+                        PerformanceModePicker(viewModel: viewModel)
+                            .padding(.horizontal, sessionHorizontalPadding)
+                            .padding(.vertical, 8)
+                        SessionDisplayModePicker(viewModel: viewModel)
+                            .padding(.horizontal, sessionHorizontalPadding)
+                            .padding(.bottom, 8)
+                    }
+
+                    if metronomePanelVisible {
+                        metronomeBar
+                    } else {
+                        collapsedMetronomeBar
+                    }
+
+                    if isLiveCompactHost {
+                        liveCompactHostPanel
+                    } else if isHost {
+                        hostControls
+                    } else if isGuest {
+                        #if os(macOS)
+                        macGuestControls
+                        #else
+                        guestBanner
+                        #endif
+                    }
                 }
             }
             .padding(.bottom, 8)
@@ -1009,6 +1018,41 @@ struct SessionView: View {
         }
     }
 
+    private var wideLiveCompactHostPanelContent: some View {
+        VStack(spacing: 22) {
+            HStack(alignment: .top, spacing: 18) {
+                if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
+                    ChordAdvanceBar(viewModel: viewModel)
+                        .frame(width: 196)
+                }
+
+                Group {
+                    if metronomePanelVisible {
+                        metronomeBar
+                    } else {
+                        collapsedMetronomeBar
+                    }
+                }
+                .padding(.horizontal, -sessionHorizontalPadding)
+                .padding(.bottom, -12)
+                .frame(maxWidth: .infinity)
+
+                if viewModel.canDriveSession {
+                    BackingTrackPanel(viewModel: viewModel) {
+                        showBackingTrackImporter = true
+                    }
+                    .frame(maxWidth: 320)
+                }
+            }
+
+            LiveCuePad(viewModel: viewModel, usesWideLayout: true)
+
+            liveCompactSecondaryActions(wide: true)
+        }
+        .padding(.horizontal, sessionHorizontalPadding)
+        .padding(.vertical, 12)
+    }
+
     private var liveCompactHostPanel: some View {
         VStack(spacing: 14) {
             if viewModel.canDriveSession {
@@ -1021,69 +1065,98 @@ struct SessionView: View {
             LiveCuePad(viewModel: viewModel)
                 .padding(.horizontal, sessionHorizontalPadding)
 
-            HStack(spacing: 10) {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                        liveToolsExpanded = true
-                    }
-                } label: {
-                    Label(String(localized: "More Tools"), systemImage: "slider.horizontal.3")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-
-                Button {
-                    showPianoOverlay = true
-                    viewModel.openPiano()
-                } label: {
-                    Label(String(localized: "Piano"), systemImage: "pianokeys")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .foregroundStyle(AppTheme.textPrimary)
-            .padding(.horizontal, sessionHorizontalPadding)
-
-            HStack(spacing: 10) {
-                Menu {
-                    Picker("View", selection: Binding(
-                        get: { viewModel.payload.displayMode },
-                        set: { viewModel.setDisplayMode($0) }
-                    )) {
-                        ForEach(SessionDisplayMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                } label: {
-                    Label(String(localized: "View"), systemImage: "rectangle.on.rectangle")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-
-                Button {
-                    showPreServiceChecklist = true
-                } label: {
-                    Label(String(localized: "Pre-Service"), systemImage: "checklist")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .foregroundStyle(AppTheme.textPrimary)
-            .padding(.horizontal, sessionHorizontalPadding)
+            liveCompactSecondaryActions(wide: false)
+                .padding(.horizontal, sessionHorizontalPadding)
         }
         .padding(.top, 8)
+    }
+
+    private func liveCompactSecondaryActions(wide: Bool) -> some View {
+        Group {
+            if wide {
+                HStack(spacing: 12) {
+                    liveCompactMoreToolsButton
+                    liveCompactPianoButton
+                    liveCompactViewMenu
+                    liveCompactPreServiceButton
+                }
+            } else {
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        liveCompactMoreToolsButton
+                        liveCompactPianoButton
+                    }
+
+                    HStack(spacing: 10) {
+                        liveCompactViewMenu
+                        liveCompactPreServiceButton
+                    }
+                }
+            }
+        }
+        .foregroundStyle(AppTheme.textPrimary)
+    }
+
+    private var liveCompactMoreToolsButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                liveToolsExpanded = true
+            }
+        } label: {
+            Label(String(localized: "More Tools"), systemImage: "slider.horizontal.3")
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var liveCompactPianoButton: some View {
+        Button {
+            showPianoOverlay = true
+            viewModel.openPiano()
+        } label: {
+            Label(String(localized: "Piano"), systemImage: "pianokeys")
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var liveCompactViewMenu: some View {
+        Menu {
+            Picker("View", selection: Binding(
+                get: { viewModel.payload.displayMode },
+                set: { viewModel.setDisplayMode($0) }
+            )) {
+                ForEach(SessionDisplayMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+        } label: {
+            Label(String(localized: "View"), systemImage: "rectangle.on.rectangle")
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var liveCompactPreServiceButton: some View {
+        Button {
+            showPreServiceChecklist = true
+        } label: {
+            Label(String(localized: "Pre-Service"), systemImage: "checklist")
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
     }
 
     private func presentPreServiceChecklistIfNeeded() {

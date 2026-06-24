@@ -364,39 +364,54 @@ struct LiveCueBanner: View {
 
 struct LiveCuePad: View {
     @Bindable var viewModel: SessionViewModel
+    var usesWideLayout = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: usesWideLayout ? 14 : 10) {
             Text("Band Cues")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary)
                 .textCase(.uppercase)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                ForEach(LiveCue.presets, id: \.0) { text, symbol in
-                    Button {
-                        viewModel.sendLiveCue(text, symbol: symbol)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: symbol)
-                            Text(String(localized: String.LocalizationValue(text)))
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(isCueActive(text) ? AppTheme.accent.opacity(0.28) : AppTheme.surfaceElevated)
-                        .overlay {
-                            if isCueActive(text) {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(AppTheme.accent, lineWidth: 2)
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            if usesWideLayout {
+                HStack(spacing: 12) {
+                    ForEach(LiveCue.presets, id: \.0) { text, symbol in
+                        cueButton(text: text, symbol: symbol)
+                            .frame(maxWidth: .infinity)
                     }
-                    .foregroundStyle(isCueActive(text) ? AppTheme.accent : AppTheme.textPrimary)
+                }
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(LiveCue.presets, id: \.0) { text, symbol in
+                        cueButton(text: text, symbol: symbol)
+                    }
                 }
             }
         }
+    }
+
+    private func cueButton(text: String, symbol: String) -> some View {
+        Button {
+            viewModel.sendLiveCue(text, symbol: symbol)
+        } label: {
+            VStack(spacing: usesWideLayout ? 6 : 4) {
+                Image(systemName: symbol)
+                    .font(usesWideLayout ? .body.weight(.semibold) : .body)
+                Text(String(localized: String.LocalizationValue(text)))
+                    .font(usesWideLayout ? .caption.weight(.semibold) : .caption2.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, usesWideLayout ? 14 : 10)
+            .background(isCueActive(text) ? AppTheme.accent.opacity(0.28) : AppTheme.surfaceElevated)
+            .overlay {
+                if isCueActive(text) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(AppTheme.accent, lineWidth: 2)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .foregroundStyle(isCueActive(text) ? AppTheme.accent : AppTheme.textPrimary)
     }
 
     private func isCueActive(_ text: String) -> Bool {
