@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chordyx</title>
-  <meta name="description" content="Chordyx — share chord progressions in real time with your band.">
+  <title>Chordyx — Dirige acordes en vivo</title>
+  <meta name="description" content="Chordyx — el director lleva la progresión; la banda la sigue en tiempo real. Sin PDFs, sin cuenta en la nube.">
   <style>
     :root {
       --bg: #0d0f14;
@@ -30,7 +30,8 @@
       box-shadow: 0 12px 40px rgba(245, 197, 24, 0.18);
     }
     h1 { font-size: 2.4rem; letter-spacing: -0.02em; margin-bottom: 12px; }
-    .tagline { color: var(--muted); font-size: 1.125rem; margin-bottom: 32px; }
+    .tagline { color: var(--text); font-size: 1.25rem; font-weight: 600; margin-bottom: 8px; }
+    .subtagline { color: var(--muted); font-size: 1.05rem; margin-bottom: 32px; }
     .card {
       background: var(--surface); border: 1px solid rgba(255,255,255,0.08);
       border-radius: 16px; padding: 24px; margin-bottom: 16px;
@@ -38,6 +39,7 @@
     h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 12px; }
     ul { padding-left: 1.2rem; color: var(--muted); }
     li { margin-bottom: 8px; }
+    .highlight { color: var(--text); }
     a { color: var(--accent-2); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
@@ -49,41 +51,86 @@
       background: transparent; color: var(--text);
       border: 1px solid rgba(255,255,255,0.12);
     }
+    .pill {
+      display: inline-block; font-size: 0.75rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(245, 197, 24, 0.15); color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .compare { font-size: 0.95rem; color: var(--muted); }
+    .compare strong { color: var(--text); }
     footer { margin-top: 48px; color: var(--muted); font-size: 0.875rem; }
+    hr.divider { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0; }
+    .lang-note { font-size: 0.9rem; color: var(--muted); }
   </style>
 </head>
 <body>
   <main class="wrap">
     <div class="logo" aria-hidden="true">♪</div>
+    <p class="pill">TestFlight beta</p>
     <h1>Chordyx</h1>
-    <p class="tagline">Share chord progressions in real time with your band — on stage, in rehearsal, or at home.</p>
+    <p class="tagline">El director lleva la progresión. La banda la sigue en vivo.</p>
+    <p class="subtagline">
+      Teleprompter de acordes para escenario — no pasas PDFs, conduces el momento.
+      Ideal para plantés, ensayos y servicios donde todos están en la misma sala.
+    </p>
 
     <section class="card">
-      <h2>What it does</h2>
+      <h2>Para quién es</h2>
       <ul>
-        <li>Host or join a live session with nearby musicians</li>
-        <li>Follow chords on a circular progression display</li>
-        <li>Sync metronome, piano, and fretboard views</li>
-        <li>Save progressions and build setlists on the fly</li>
-        <li>Support chord symbols and Solfège notation</li>
+        <li><span class="highlight">Líderes de alabanza</span> que quieren controlar acordes, tempo y señales sin montar Planning Center</li>
+        <li><span class="highlight">Bandas pequeñas</span> en ensayo o gig — host + invitados por Wi‑Fi local</li>
+        <li><span class="highlight">Tecladistas</span> que tocan en vivo y la banda ve solo el acorde actual</li>
       </ul>
     </section>
 
     <section class="card">
-      <h2>Beta testing</h2>
-      <p style="color: var(--muted);">
-        Chordyx is currently in TestFlight beta. You need two devices on the same Wi‑Fi
-        (or nearby via Bluetooth) to test host and guest sessions together.
+      <h2>Qué lo hace distinto</h2>
+      <ul>
+        <li><span class="highlight">Anillo de acordes</span> pensado para escenario oscuro — grande, claro, siguiente acorde visible</li>
+        <li><span class="highlight">Modo piano / MIDI</span> — tú tocas; ellos siguen el acorde que suena</li>
+        <li><span class="highlight">Señales de banda</span> — Hold, Vamp, Break y más, sincronizadas al instante</li>
+        <li><span class="highlight">Sin cuenta en la nube</span> — sesión local entre dispositivos cercanos</li>
+        <li>Setlists, metrónomo, count-in, transpose/capo por músico, Nashville y solfeo</li>
+      </ul>
+    </section>
+
+    <section class="card compare">
+      <h2>No es esto</h2>
+      <p>
+        Chordyx <strong>no</strong> compite con stems de IA, multitracks ni un catálogo de 30.000 charts.
+        Es la app para cuando <strong>tú diriges</strong> y la banda necesita seguirte — no leer un PDF estático.
       </p>
     </section>
 
+    <section class="card">
+      <h2>Probar en TestFlight</h2>
+      <p style="color: var(--muted); margin-bottom: 12px;">
+        Necesitas <strong style="color: var(--text);">dos dispositivos</strong> (iPhone/iPad/Mac) en la
+        <strong style="color: var(--text);">misma Wi‑Fi</strong> con permiso de red local activado.
+        Uno hace de host; el otro se une como invitado.
+      </p>
+      <p class="lang-note">Disponible en español e inglés según el idioma del dispositivo.</p>
+    </section>
+
     <div class="links">
-      <a class="btn secondary" href="privacy.html">Privacy Policy</a>
-      <a class="btn" href="mailto:joluesburg@gmail.com">Contact</a>
+      <a class="btn secondary" href="privacy.html">Privacidad</a>
+      <a class="btn" href="mailto:joluesburg@gmail.com">Contacto</a>
     </div>
 
+    <hr class="divider">
+
+    <section class="card">
+      <h2>English</h2>
+      <p class="tagline" style="font-size: 1.1rem;">You lead the progression. The band follows live.</p>
+      <p class="subtagline" style="margin-bottom: 0;">
+        A stage-first chord teleprompter for worship leaders and small bands — real-time sync over local Wi‑Fi, no cloud account required.
+      </p>
+    </section>
+
     <footer>
-      <p>© 2026 Chordyx. All rights reserved.</p>
+      <p>© 2026 Chordyx · Jose L. Espinosa Burgos</p>
     </footer>
   </main>
 </body>

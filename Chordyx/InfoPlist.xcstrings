@@ -13,7 +13,7 @@
         },
         "es" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Chordyx"
           }
         }
@@ -31,7 +31,7 @@
         },
         "es" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Chordyx"
           }
         }
@@ -63,8 +63,14 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable."
+            "state" : "translated",
+            "value" : "Chordyx uses Bluetooth to find nearby band members when Wi‑Fi discovery is unavailable."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx usa Bluetooth para encontrar músicos cercanos cuando no hay descubrimiento por Wi‑Fi."
           }
         }
       }
@@ -93,8 +99,14 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "Chordyx discovers nearby musicians on your local network to share chord progressions in real time."
+            "state" : "translated",
+            "value" : "Chordyx finds nearby band members on your local network so you can host or join a live chord session."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx encuentra músicos cercanos en tu red local para que puedas ser host o unirte a una sesión de acordes en vivo."
           }
         }
       }
