@@ -1,0 +1,1078 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		81CC810B2FD7A58800796A9A /* ChordyxWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 81CC81032FD7A58800796A9A /* ChordyxWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		81CC820B2FD7A59000796A9A /* ChordyxWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 81CC82002FD7A59000796A9A /* ChordyxWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		81CC80B92FD7A58700796A9A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81CC80A32FD7A58400796A9A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81CC80AA2FD7A58400796A9A;
+			remoteInfo = Chordyx;
+		};
+		81CC80C32FD7A58700796A9A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81CC80A32FD7A58400796A9A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81CC80AA2FD7A58400796A9A;
+			remoteInfo = Chordyx;
+		};
+		81CC810C2FD7A58800796A9A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81CC80A32FD7A58400796A9A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81CC81022FD7A58800796A9A;
+			remoteInfo = ChordyxWatch;
+		};
+		81CC820C2FD7A59000796A9A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 81CC80A32FD7A58400796A9A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81CC82032FD7A59000796A9A;
+			remoteInfo = ChordyxWidgetsExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		81CC810A2FD7A58800796A9A /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				81CC810B2FD7A58800796A9A /* ChordyxWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC820A2FD7A59000796A9A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				81CC820B2FD7A59000796A9A /* ChordyxWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		81CC80AB2FD7A58400796A9A /* Chordyx.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chordyx.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		81CC80B82FD7A58700796A9A /* ChordyxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChordyxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		81CC80C22FD7A58700796A9A /* ChordyxUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChordyxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		81CC81032FD7A58800796A9A /* ChordyxWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChordyxWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		81CC81102FD7A58900796A9A /* Chordyx.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chordyx.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		81CC82002FD7A59000796A9A /* ChordyxWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ChordyxWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		81CC80E02FD7A58700796A9A /* Exceptions for "Chordyx" folder in "Chordyx" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				MacInfo.plist,
+			);
+			target = 81CC80AA2FD7A58400796A9A /* Chordyx */;
+		};
+		81CC81112FD7A58900796A9A /* Exceptions for "Chordyx" folder in "ChordyxMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				MacInfo.plist,
+				Services/LiveActivityManager.swift,
+			);
+			target = 81CC81122FD7A58900796A9A /* ChordyxMac */;
+		};
+		81CC82102FD7A59100796A9A /* Exceptions for "ChordyxWidgets" folder in "ChordyxWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 81CC82032FD7A59000796A9A /* ChordyxWidgetsExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		81CC80AD2FD7A58400796A9A /* Chordyx */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				81CC80E02FD7A58700796A9A /* Exceptions for "Chordyx" folder in "Chordyx" target */,
+				81CC81112FD7A58900796A9A /* Exceptions for "Chordyx" folder in "ChordyxMac" target */,
+			);
+			path = Chordyx;
+			sourceTree = "<group>";
+		};
+		81CC80BB2FD7A58700796A9A /* ChordyxTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChordyxTests;
+			sourceTree = "<group>";
+		};
+		81CC80C52FD7A58700796A9A /* ChordyxUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChordyxUITests;
+			sourceTree = "<group>";
+		};
+		81CC810E2FD7A58800796A9A /* ChordyxWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChordyxWatch;
+			sourceTree = "<group>";
+		};
+		81CC82012FD7A59000796A9A /* ChordyxWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				81CC82102FD7A59100796A9A /* Exceptions for "ChordyxWidgets" folder in "ChordyxWidgetsExtension" target */,
+			);
+			path = ChordyxWidgets;
+			sourceTree = "<group>";
+		};
+		81CC82022FD7A59000796A9A /* ChordyxLiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChordyxLiveActivity;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		81CC80A82FD7A58400796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80B52FD7A58700796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80BF2FD7A58700796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81052FD7A58800796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81132FD7A58900796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC82052FD7A59000796A9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		81CC80A22FD7A58400796A9A = {
+			isa = PBXGroup;
+			children = (
+				81CC80AD2FD7A58400796A9A /* Chordyx */,
+				81CC82022FD7A59000796A9A /* ChordyxLiveActivity */,
+				81CC82012FD7A59000796A9A /* ChordyxWidgets */,
+				81CC810E2FD7A58800796A9A /* ChordyxWatch */,
+				81CC80BB2FD7A58700796A9A /* ChordyxTests */,
+				81CC80C52FD7A58700796A9A /* ChordyxUITests */,
+				81CC80AC2FD7A58400796A9A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		81CC80AC2FD7A58400796A9A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				81CC80AB2FD7A58400796A9A /* Chordyx.app */,
+				81CC81102FD7A58900796A9A /* Chordyx.app */,
+				81CC81032FD7A58800796A9A /* ChordyxWatch.app */,
+				81CC82002FD7A59000796A9A /* ChordyxWidgetsExtension.appex */,
+				81CC80B82FD7A58700796A9A /* ChordyxTests.xctest */,
+				81CC80C22FD7A58700796A9A /* ChordyxUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		81CC80AA2FD7A58400796A9A /* Chordyx */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC80CC2FD7A58700796A9A /* Build configuration list for PBXNativeTarget "Chordyx" */;
+			buildPhases = (
+				81CC80A72FD7A58400796A9A /* Sources */,
+				81CC80A82FD7A58400796A9A /* Frameworks */,
+				81CC80A92FD7A58400796A9A /* Resources */,
+				81CC820A2FD7A59000796A9A /* Embed Foundation Extensions */,
+				81CC810A2FD7A58800796A9A /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81CC810D2FD7A58800796A9A /* PBXTargetDependency */,
+				81CC820D2FD7A59000796A9A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				81CC80AD2FD7A58400796A9A /* Chordyx */,
+				81CC82022FD7A59000796A9A /* ChordyxLiveActivity */,
+			);
+			name = Chordyx;
+			packageProductDependencies = (
+			);
+			productName = Chordyx;
+			productReference = 81CC80AB2FD7A58400796A9A /* Chordyx.app */;
+			productType = "com.apple.product-type.application";
+		};
+		81CC80B72FD7A58700796A9A /* ChordyxTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC80CF2FD7A58700796A9A /* Build configuration list for PBXNativeTarget "ChordyxTests" */;
+			buildPhases = (
+				81CC80B42FD7A58700796A9A /* Sources */,
+				81CC80B52FD7A58700796A9A /* Frameworks */,
+				81CC80B62FD7A58700796A9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81CC80BA2FD7A58700796A9A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				81CC80BB2FD7A58700796A9A /* ChordyxTests */,
+			);
+			name = ChordyxTests;
+			packageProductDependencies = (
+			);
+			productName = ChordyxTests;
+			productReference = 81CC80B82FD7A58700796A9A /* ChordyxTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		81CC80C12FD7A58700796A9A /* ChordyxUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC80D22FD7A58700796A9A /* Build configuration list for PBXNativeTarget "ChordyxUITests" */;
+			buildPhases = (
+				81CC80BE2FD7A58700796A9A /* Sources */,
+				81CC80BF2FD7A58700796A9A /* Frameworks */,
+				81CC80C02FD7A58700796A9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81CC80C42FD7A58700796A9A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				81CC80C52FD7A58700796A9A /* ChordyxUITests */,
+			);
+			name = ChordyxUITests;
+			packageProductDependencies = (
+			);
+			productName = ChordyxUITests;
+			productReference = 81CC80C22FD7A58700796A9A /* ChordyxUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		81CC81022FD7A58800796A9A /* ChordyxWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC81072FD7A58800796A9A /* Build configuration list for PBXNativeTarget "ChordyxWatch" */;
+			buildPhases = (
+				81CC81042FD7A58800796A9A /* Sources */,
+				81CC81052FD7A58800796A9A /* Frameworks */,
+				81CC81062FD7A58800796A9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				81CC810E2FD7A58800796A9A /* ChordyxWatch */,
+			);
+			name = ChordyxWatch;
+			packageProductDependencies = (
+			);
+			productName = ChordyxWatch;
+			productReference = 81CC81032FD7A58800796A9A /* ChordyxWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		81CC81122FD7A58900796A9A /* ChordyxMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC81182FD7A58900796A9A /* Build configuration list for PBXNativeTarget "ChordyxMac" */;
+			buildPhases = (
+				81CC81152FD7A58900796A9A /* Sources */,
+				81CC81132FD7A58900796A9A /* Frameworks */,
+				81CC81142FD7A58900796A9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				81CC80AD2FD7A58400796A9A /* Chordyx */,
+			);
+			name = ChordyxMac;
+			packageProductDependencies = (
+			);
+			productName = ChordyxMac;
+			productReference = 81CC81102FD7A58900796A9A /* Chordyx.app */;
+			productType = "com.apple.product-type.application";
+		};
+		81CC82032FD7A59000796A9A /* ChordyxWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 81CC82092FD7A59000796A9A /* Build configuration list for PBXNativeTarget "ChordyxWidgetsExtension" */;
+			buildPhases = (
+				81CC82042FD7A59000796A9A /* Sources */,
+				81CC82052FD7A59000796A9A /* Frameworks */,
+				81CC82062FD7A59000796A9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				81CC82012FD7A59000796A9A /* ChordyxWidgets */,
+				81CC82022FD7A59000796A9A /* ChordyxLiveActivity */,
+			);
+			name = ChordyxWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = ChordyxWidgetsExtension;
+			productReference = 81CC82002FD7A59000796A9A /* ChordyxWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		81CC80A32FD7A58400796A9A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2650;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+					81CC80AA2FD7A58400796A9A = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					81CC80B72FD7A58700796A9A = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 81CC80AA2FD7A58400796A9A;
+					};
+					81CC80C12FD7A58700796A9A = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 81CC80AA2FD7A58400796A9A;
+					};
+					81CC81022FD7A58800796A9A = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					81CC81122FD7A58900796A9A = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					81CC82032FD7A59000796A9A = {
+						CreatedOnToolsVersion = 26.5;
+					};
+				};
+			};
+			buildConfigurationList = 81CC80A62FD7A58400796A9A /* Build configuration list for PBXProject "Chordyx" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				es,
+			);
+			mainGroup = 81CC80A22FD7A58400796A9A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 81CC80AC2FD7A58400796A9A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				81CC80AA2FD7A58400796A9A /* Chordyx */,
+				81CC81122FD7A58900796A9A /* ChordyxMac */,
+				81CC82032FD7A59000796A9A /* ChordyxWidgetsExtension */,
+				81CC81022FD7A58800796A9A /* ChordyxWatch */,
+				81CC80B72FD7A58700796A9A /* ChordyxTests */,
+				81CC80C12FD7A58700796A9A /* ChordyxUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		81CC80A92FD7A58400796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80B62FD7A58700796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80C02FD7A58700796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81062FD7A58800796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81142FD7A58900796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC82062FD7A59000796A9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		81CC80A72FD7A58400796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80B42FD7A58700796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC80BE2FD7A58700796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81042FD7A58800796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC81152FD7A58900796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81CC82042FD7A59000796A9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		81CC80BA2FD7A58700796A9A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81CC80AA2FD7A58400796A9A /* Chordyx */;
+			targetProxy = 81CC80B92FD7A58700796A9A /* PBXContainerItemProxy */;
+		};
+		81CC80C42FD7A58700796A9A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81CC80AA2FD7A58400796A9A /* Chordyx */;
+			targetProxy = 81CC80C32FD7A58700796A9A /* PBXContainerItemProxy */;
+		};
+		81CC810D2FD7A58800796A9A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81CC81022FD7A58800796A9A /* ChordyxWatch */;
+			targetProxy = 81CC810C2FD7A58800796A9A /* PBXContainerItemProxy */;
+		};
+		81CC820D2FD7A59000796A9A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81CC82032FD7A59000796A9A /* ChordyxWidgetsExtension */;
+			targetProxy = 81CC820C2FD7A59000796A9A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		81CC80CA2FD7A58700796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		81CC80CB2FD7A58700796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		81CC80CD2FD7A58700796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Chordyx/Chordyx.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Chordyx/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Chordyx scans printed chord sheets with your camera to build a song progression automatically.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx discovers nearby musicians on your local network to share chord progressions in real time.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Chordyx can import chord charts from photos in your library.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		81CC80CE2FD7A58700796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Chordyx/Chordyx.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Chordyx/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Chordyx scans printed chord sheets with your camera to build a song progression automatically.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx discovers nearby musicians on your local network to share chord progressions in real time.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Chordyx can import chord charts from photos in your library.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		81CC80D02FD7A58700796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.ChordyxTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Chordyx.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Chordyx";
+			};
+			name = Debug;
+		};
+		81CC80D12FD7A58700796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.ChordyxTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Chordyx.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Chordyx";
+			};
+			name = Release;
+		};
+		81CC80D32FD7A58700796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.ChordyxUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Chordyx;
+			};
+			name = Debug;
+		};
+		81CC80D42FD7A58700796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.ChordyxUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Chordyx;
+			};
+			name = Release;
+		};
+		81CC81082FD7A58800796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = Espinosa.Chordyx;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		81CC81092FD7A58800796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = Espinosa.Chordyx;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		81CC81162FD7A58900796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Chordyx/ChordyxMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Chordyx/MacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx discovers nearby musicians on your local network to share chord progressions in real time.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.mac;
+				PRODUCT_NAME = Chordyx;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		81CC81172FD7A58900796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Chordyx/ChordyxMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Chordyx/MacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx discovers nearby musicians on your local network to share chord progressions in real time.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.mac;
+				PRODUCT_NAME = Chordyx;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		81CC82072FD7A59000796A9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ChordyxWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.ChordyxWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		81CC82082FD7A59000796A9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VR3672X7PZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ChordyxWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Chordyx;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Espinosa.Chordyx.ChordyxWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		81CC80A62FD7A58400796A9A /* Build configuration list for PBXProject "Chordyx" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC80CA2FD7A58700796A9A /* Debug */,
+				81CC80CB2FD7A58700796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC80CC2FD7A58700796A9A /* Build configuration list for PBXNativeTarget "Chordyx" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC80CD2FD7A58700796A9A /* Debug */,
+				81CC80CE2FD7A58700796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC80CF2FD7A58700796A9A /* Build configuration list for PBXNativeTarget "ChordyxTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC80D02FD7A58700796A9A /* Debug */,
+				81CC80D12FD7A58700796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC80D22FD7A58700796A9A /* Build configuration list for PBXNativeTarget "ChordyxUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC80D32FD7A58700796A9A /* Debug */,
+				81CC80D42FD7A58700796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC81072FD7A58800796A9A /* Build configuration list for PBXNativeTarget "ChordyxWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC81082FD7A58800796A9A /* Debug */,
+				81CC81092FD7A58800796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC81182FD7A58900796A9A /* Build configuration list for PBXNativeTarget "ChordyxMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC81162FD7A58900796A9A /* Debug */,
+				81CC81172FD7A58900796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		81CC82092FD7A59000796A9A /* Build configuration list for PBXNativeTarget "ChordyxWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				81CC82072FD7A59000796A9A /* Debug */,
+				81CC82082FD7A59000796A9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 81CC80A32FD7A58400796A9A /* Project object */;
+}

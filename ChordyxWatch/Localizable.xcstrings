@@ -1,0 +1,36 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld BPM" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld BPM"
+          }
+        }
+      }
+    },
+    "· beat %lld" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· pulso %lld"
+          }
+        }
+      }
+    },
+    "then %@" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "luego %@"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
