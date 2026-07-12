@@ -2570,6 +2570,12 @@ final class SessionViewModel {
         refreshMetronomeAudioPolicy()
         setScreenAlwaysOn(true)
         metronome.setSessionKeepAlive(false)
+        #if os(iOS)
+        // Solo Drums hosting is Mac-only; clear any leftover iPhone host state.
+        if soloAccompanimentEnabled {
+            setSoloAccompanimentEnabled(false)
+        }
+        #endif
         refreshSessionAudioPolicy()
         LiveActivityManager.update(from: self, force: true)
         if role == .host {

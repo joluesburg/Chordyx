@@ -5,7 +5,7 @@
 //  Mac-only UI for live tempo tracking and drum accompaniment.
 //
 
-#if os(macOS) || os(iOS)
+#if os(macOS)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -543,7 +543,7 @@ struct SoloAccompanimentMacPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(String(localized: "Audio AI (microphone)"))
                         .font(.subheadline.weight(.semibold))
-                    Text(String(localized: "Optional — MIDI learns your style by default. Mic turns off when drums join to prevent feedback."))
+                    Text(String(localized: "Optional — MIDI learns your style by default. The mic is used only while listening for tempo; it turns off when drums start to prevent feedback."))
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                 }

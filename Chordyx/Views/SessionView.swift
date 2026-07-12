@@ -1679,7 +1679,7 @@ struct SessionView: View {
                 }
             }
 
-            #if os(macOS) || os(iOS)
+            #if os(macOS)
             if viewModel.canDriveSession {
                 SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
             }
@@ -1733,7 +1733,7 @@ struct SessionView: View {
                 .padding(.horizontal, sessionHorizontalPadding)
             }
 
-            #if os(macOS) || os(iOS)
+            #if os(macOS)
             if viewModel.canDriveSession {
                 SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
                     .padding(.horizontal, sessionHorizontalPadding)
