@@ -68,10 +68,14 @@ struct PianoView: View {
 
     private var instrumentBoardHeight: CGFloat {
         if isCompactHeight { return 150 }
+        return showsFullPianoKeyboard ? 280 : 240
+    }
+
+    private var keyboardHorizontalPadding: CGFloat {
         #if os(macOS)
-        return 420
+        8
         #else
-        return showsFullPianoKeyboard ? 320 : 240
+        showsFullPianoKeyboard ? 16 : 12
         #endif
     }
 
@@ -99,8 +103,8 @@ struct PianoView: View {
                         preferFlats: preferFlats,
                         isCompactHeight: isCompactHeight
                     )
-                    .frame(minHeight: instrumentBoardHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(height: instrumentBoardHeight)
+                    .frame(maxWidth: .infinity)
                     .layoutPriority(1)
                     .padding(.horizontal, 12)
                 } else {
@@ -110,10 +114,10 @@ struct PianoView: View {
                         isInteractive: isHost,
                         onTap: { viewModel.playPianoNote($0) }
                     )
-                    .frame(minHeight: instrumentBoardHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                    .padding(.horizontal, showsFullPianoKeyboard ? 20 : 12)
+                    .frame(height: instrumentBoardHeight)
+                    .frame(maxWidth: .infinity)
+                    .layoutPriority(showsFullPianoKeyboard || isCompactHeight ? 1 : 0)
+                    .padding(.horizontal, keyboardHorizontalPadding)
                 }
 
                 if isHost {

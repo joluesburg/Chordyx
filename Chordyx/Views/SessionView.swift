@@ -702,10 +702,6 @@ struct SessionView: View {
             if isHost, !viewModel.sessionManager.connectedPeers.isEmpty, showsSecondaryBandOverlays {
                 SilentNudgePad(viewModel: viewModel)
             }
-
-            if viewModel.isInSession, showsSessionQuickMessages {
-                QuickMessageBar(viewModel: viewModel, canSend: !isGuest || viewModel.isCoHost)
-            }
         }
         .padding(.horizontal, sessionHorizontalPadding)
         .padding(.top, 8)
@@ -714,11 +710,6 @@ struct SessionView: View {
 
     private var showsSecondaryBandOverlays: Bool {
         !isLiveCompactHost
-    }
-
-    private var showsSessionQuickMessages: Bool {
-        if isLiveCompactHost { return bandCuePadVisible }
-        return isHost || showsSecondaryBandOverlays
     }
 
     private var notationOverlayAlignment: Alignment {

@@ -242,11 +242,11 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
         #endif
     }
     #if os(macOS)
-    /// Wide sheet so many fixed-size keys fit on MacBook / studio displays.
+    /// Wide, shallow sheet — fill horizontal space so more keys are visible at once.
     private var macPianoSheetBody: some View {
         sheetContent()
-            .frame(minWidth: 1180, idealWidth: 1480, maxWidth: .infinity,
-                   minHeight: 720, idealHeight: 900, maxHeight: .infinity)
+            .frame(minWidth: 1200, idealWidth: .infinity, maxWidth: .infinity,
+                   minHeight: 400, maxHeight: 540)
             .background(AppTheme.backgroundGradient.ignoresSafeArea())
     }
     #endif
