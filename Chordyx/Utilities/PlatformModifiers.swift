@@ -230,16 +230,16 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
             } else if let onDismiss {
                 content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
                     sheetContent()
-                        .presentationDetents([.fraction(0.42), .large])
+                        .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42)))
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 }
             } else {
                 content.sheet(isPresented: $isPresented) {
                     sheetContent()
-                        .presentationDetents([.fraction(0.42), .large])
+                        .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42)))
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 }
             }
         }

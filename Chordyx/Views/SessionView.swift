@@ -88,8 +88,9 @@ struct SessionView: View {
         isLivePerformance && !liveToolsExpanded
     }
 
-    /// Live chord sync is the product's core — never bury it behind ring layout.
+    /// Prefer Stage hero in Live unless the user explicitly chose Ring.
     private var prefersLiveChordHeroDisplay: Bool {
+        guard effectiveDisplayMode != .ring else { return false }
         if viewModel.payload.isLiveChordsOnly { return true }
         if guestShowsLiveNowOnly { return true }
         if usesLiveChordHeroLayout { return true }
@@ -98,7 +99,7 @@ struct SessionView: View {
     }
 
     private var usesChordRingLayout: Bool {
-        effectiveDisplayMode == .ring && !prefersLiveChordHeroDisplay
+        effectiveDisplayMode == .ring
     }
 
     private var isCountInActive: Bool {
@@ -343,7 +344,9 @@ struct SessionView: View {
 
     private var ringShowsLiveChords: Bool {
         if viewModel.payload.isLiveChordsOnly { return true }
-        return isHost ? viewModel.payload.ringShowsLiveChords : showLiveChordsOnRing
+        if isHost { return viewModel.payload.ringShowsLiveChords }
+        // Guests follow the host Live ring flag; local toggle can still force it on.
+        return viewModel.payload.ringShowsLiveChords || showLiveChordsOnRing
     }
 
     private var ringSourceBinding: Binding<Bool> {
@@ -546,6 +549,7 @@ struct SessionView: View {
     private func configureSessionOnAppear() {
         if isGuest {
             viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
+            showLiveChordsOnRing = viewModel.payload.ringShowsLiveChords
         } else {
             viewModel.refreshMetronomeAudioPolicy()
         }
@@ -855,6 +859,11 @@ struct SessionView: View {
             }
             .onChange(of: viewModel.payload.isFretboardActive) { _, isActive in
                 if !isActive { showFretboardOverlay = false }
+            }
+            .onChange(of: viewModel.payload.ringShowsLiveChords) { _, showsLive in
+                if isGuest {
+                    showLiveChordsOnRing = showsLive
+                }
             }
 #if os(macOS)
             .onKeyPress(.leftArrow) {

@@ -209,6 +209,10 @@ struct SavedProgression: Identifiable, Codable, Equatable, Hashable, Sendable {
     var pdfFileName: String?
     /// Band notes visible in rehearsal mode (capo reminders, dynamics, etc.).
     var rehearsalNotes: String
+    /// Short notes keyed by GuestViewRole raw value for live display.
+    var roleNotes: [String: String]
+    /// Named arrangement layouts (Sunday A, acoustic, etc.).
+    var arrangementVariants: [ArrangementVariant]
 
     init(
         id: UUID = UUID(),
@@ -227,7 +231,9 @@ struct SavedProgression: Identifiable, Codable, Equatable, Hashable, Sendable {
         isLoopEnabled: Bool = false,
         lyricsLines: [LyricsLine] = [],
         pdfFileName: String? = nil,
-        rehearsalNotes: String = ""
+        rehearsalNotes: String = "",
+        roleNotes: [String: String] = [:],
+        arrangementVariants: [ArrangementVariant] = []
     ) {
         self.id = id
         self.name = name
@@ -246,6 +252,8 @@ struct SavedProgression: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.lyricsLines = lyricsLines
         self.pdfFileName = pdfFileName
         self.rehearsalNotes = rehearsalNotes
+        self.roleNotes = roleNotes
+        self.arrangementVariants = arrangementVariants
     }
 
     var summary: String {
@@ -258,7 +266,7 @@ struct SavedProgression: Identifiable, Codable, Equatable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, name, key, notation, chords, tempoBPM, beatsPerBar, beatUnit, savedAt
         case sections, lyrics, loopStartChordID, loopEndChordID, isLoopEnabled
-        case lyricsLines, pdfFileName, rehearsalNotes
+        case lyricsLines, pdfFileName, rehearsalNotes, roleNotes, arrangementVariants
     }
 
     init(from decoder: Decoder) throws {
@@ -280,6 +288,8 @@ struct SavedProgression: Identifiable, Codable, Equatable, Hashable, Sendable {
         lyricsLines = try container.decodeIfPresent([LyricsLine].self, forKey: .lyricsLines) ?? []
         pdfFileName = try container.decodeIfPresent(String.self, forKey: .pdfFileName)
         rehearsalNotes = try container.decodeIfPresent(String.self, forKey: .rehearsalNotes) ?? ""
+        roleNotes = try container.decodeIfPresent([String: String].self, forKey: .roleNotes) ?? [:]
+        arrangementVariants = try container.decodeIfPresent([ArrangementVariant].self, forKey: .arrangementVariants) ?? []
     }
 }
 
@@ -300,8 +310,18 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     var pianoNotes: [Int] = []
     /// Chord symbol recognized from the host's current piano/MIDI notes.
     var liveChordSymbol: String?
-    /// Recent chords the host played freestyle (MIDI / piano), oldest first.
+    /// True when a repeating live loop was auto-applied to `chords` (synced to guests).
+    var hasInferredLiveProgression: Bool = false
+    /// Unique chords on the current live ring (most-used first, capped for display).
     var freestyleChordSymbols: [String] = []
+    /// Play counts keyed by normalized chord symbol (host builds the ring from these).
+    var liveRingUsageCounts: [String: Int] = [:]
+    /// Normalized symbols in order of last performance (oldest first).
+    var liveRingRecentOrder: [String] = []
+    /// Latest display spelling per normalized chord symbol.
+    var liveRingCanonicalSymbols: [String: String] = [:]
+    /// Completed live rings from earlier songs in this session (each list is unique chords, oldest first).
+    var liveRingSegments: [[String]] = []
     var isFretboardActive: Bool = false
     var fretInstrument: FretInstrument = .acoustic
     var bassStrings: Int = 4
@@ -330,6 +350,14 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     var autoAdvanceSetlist: Bool = false
     /// When true, the ring shows live-played chords instead of the saved progression.
     var ringShowsLiveChords: Bool = false
+    /// Host listens to live chords and picks the key automatically.
+    var autoDetectKey: Bool = true
+    /// True when the current key was chosen by auto-detection (shown in the UI).
+    var isKeyAutoDetected: Bool = false
+    /// Internet backup via iCloud — works over cellular when local Wi‑Fi fails.
+    var isRemoteBackupEnabled: Bool = true
+    /// Short code guests can enter to follow the session over the Internet.
+    var remoteJoinCode: String?
     /// Freestyle session: broadcast the current live chord only (no progression, no next chord).
     var isLiveChordsOnly: Bool = false
     /// Stable ID for reconnecting to the same session.
@@ -351,6 +379,61 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     /// Reference track title shown to the band (host plays locally).
     var backingTrackDisplayName: String = ""
     var isBackingTrackPlaying: Bool = false
+    /// Host assigns display presets per connected musician name.
+    var guestRoleAssignments: [String: GuestViewRole] = [:]
+    /// Projector / confidence-monitor layout — controls hidden on guest devices.
+    var isStageDisplayOnly: Bool = false
+    /// When live piano disagrees with the chart (e.g. "Played Am · chart A").
+    var pianoChartMismatch: String?
+    /// Timeline capture active for rehearsal replay.
+    var isRecordingRehearsal: Bool = false
+    /// Peer name the host invited to take over hosting duties.
+    var pendingHostHandoffPeer: String?
+    /// Count-in beats left — synced for lock screen / widgets.
+    var countInBeatsRemaining: Int = 0
+    /// Send MIDI program changes on cues (host).
+    var isMIDICueOutEnabled: Bool = false
+    /// Beats remaining before the next section jump.
+    var sectionCountdownBeats: Int = 0
+    var sectionCountdownLabel: String?
+    /// Positive = ahead of metronome, negative = behind.
+    var tempoDriftBPM: Double = 0
+    var quickMessages: [SessionQuickMessage] = []
+    var peerPresence: [String: PeerPresenceInfo] = [:]
+    var handoffCountdown: Int?
+    var handoffFromPeer: String?
+    var isGhostBandReplayActive: Bool = false
+    var vocalTargetKeyName: String?
+    var syncedRoleNotes: [String: String] = [:]
+    var nextSetlistSongTitle: String?
+    var isSectionMapLocked: Bool = false
+    var tempoRampTargetBPM: Double?
+    var tempoRampBarsRemaining: Int = 0
+    var clickTrackLanes: [String: String] = [:]
+    var chartDeliveryModes: [String: String] = [:]
+    var peerChordPositions: [String: UUID] = [:]
+    var serviceTimelineStartEpoch: Double?
+    var voicingHintsEnabled: Bool = false
+    var readinessScore: Int?
+    var isCongregationModeActive: Bool = false
+    var congregationJoinToken: String?
+    var sectionLoopCountInBars: Int = 1
+    var broadcastSilentNudge: SilentNudgeKind?
+    var silentNudgeSequence: Int = 0
+    /// Mac host: live groove (solo drums) is enabled — guests show tempo & genre.
+    var hostLiveGrooveActive: Bool = false
+    /// Detected or locked BPM from the host's piano analysis.
+    var hostLiveGrooveBPM: Double?
+    /// `LiveMusicStyle.rawValue` for guest genre display.
+    var hostLiveGrooveStyleRaw: String?
+    /// `SoloDrumWorkflowPhase.rawValue` for guest status.
+    var hostLiveGroovePhaseRaw: String?
+    /// Worldwide genre id from `GlobalMusicGenreCatalog` (guest display).
+    var hostGlobalGenreID: String?
+    /// Localized genre label for guests without catalog lookup.
+    var hostGlobalGenreLabel: String?
+    /// `GlobalMusicRegion.rawValue` for guest region badge.
+    var hostGlobalGenreRegionRaw: String?
 
     static let empty = SessionSyncPayload(
         sessionName: "",
@@ -360,6 +443,129 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         activeChordID: nil,
         isHost: false
     )
+
+    /// Strips host-only / bulky fields for high-frequency live MIDI broadcasts.
+    func forHighFrequencyPeerSync() -> SessionSyncPayload {
+        var copy = self
+        copy.quickMessages = []
+        copy.readinessScore = nil
+        copy.chartDeliveryModes = [:]
+        copy.clickTrackLanes = [:]
+        copy.syncedRoleNotes = [:]
+        copy.rehearsalNotes = ""
+        copy.pianoChartMismatch = nil
+        copy.chords = []
+        copy.lyrics = ""
+        copy.lyricsLines = []
+        copy.sections = []
+        copy.setlistSongTitles = []
+        copy.peerChordPositions = [:]
+        return copy
+    }
+
+    /// Minimal live-chord packet for sub-10ms peer sync (guest merges into existing state).
+    func liveChordWire(revision: UInt64) -> LiveChordWire {
+        LiveChordWire(
+            sessionToken: sessionToken,
+            revision: revision,
+            liveChordSymbol: liveChordSymbol,
+            pianoNotes: pianoNotes,
+            freestyleChordSymbols: freestyleChordSymbols,
+            key: key,
+            isKeyAutoDetected: isKeyAutoDetected,
+            isPianoActive: isPianoActive
+        )
+    }
+
+    func applyingLiveWire(_ wire: LiveChordWire) -> SessionSyncPayload {
+        var merged = self
+        merged.pianoNotes = wire.pianoNotes
+        merged.liveChordSymbol = wire.liveChordSymbol
+        merged.freestyleChordSymbols = wire.freestyleChordSymbols
+        merged.key = wire.key
+        merged.isKeyAutoDetected = wire.isKeyAutoDetected
+        merged.isPianoActive = wire.isPianoActive
+        return merged
+    }
+
+    func hostLiveGrooveGuestSignature() -> String {
+        [
+            hostLiveGrooveActive ? "1" : "0",
+            hostLiveGroovePhaseRaw ?? "",
+            hostLiveGrooveStyleRaw ?? "",
+            hostLiveGrooveBPM.map { String(format: "%.1f", $0) } ?? "",
+            hostGlobalGenreID ?? "",
+            hostGlobalGenreLabel ?? ""
+        ].joined(separator: "|")
+    }
+
+    func metronomeSyncSignature() -> MetronomeSyncSignature {
+        MetronomeSyncSignature(
+            tempoBPM: tempoBPM,
+            beatsPerBar: beatsPerBar,
+            beatUnit: beatUnit,
+            isMetronomePlaying: isMetronomePlaying,
+            metronomeStartEpoch: metronomeStartEpoch,
+            countInBars: countInBars,
+            isCountingIn: isCountingIn,
+            countInStartEpoch: countInStartEpoch,
+            countInBeatsRemaining: countInBeatsRemaining
+        )
+    }
+
+    /// True when only live piano / chord fields changed — avoids full payload replacement on guests.
+    func isLiveChordBurst(comparedTo prior: SessionSyncPayload) -> Bool {
+        sessionToken == prior.sessionToken
+            && chords == prior.chords
+            && activeChordID == prior.activeChordID
+            && hasInferredLiveProgression == prior.hasInferredLiveProgression
+            && activeCue?.sentAt == prior.activeCue?.sentAt
+            && metronomeSyncSignature() == prior.metronomeSyncSignature()
+            && silentNudgeSequence == prior.silentNudgeSequence
+            && guestRoleAssignments == prior.guestRoleAssignments
+            && pendingHostHandoffPeer == prior.pendingHostHandoffPeer
+            && coHostPeerName == prior.coHostPeerName
+    }
+
+    func applyingLiveBurst(from received: SessionSyncPayload) -> SessionSyncPayload {
+        var merged = self
+        merged.pianoNotes = received.pianoNotes
+        merged.liveChordSymbol = received.liveChordSymbol
+        merged.freestyleChordSymbols = received.freestyleChordSymbols
+        merged.liveRingUsageCounts = received.liveRingUsageCounts
+        merged.liveRingRecentOrder = received.liveRingRecentOrder
+        merged.liveRingCanonicalSymbols = received.liveRingCanonicalSymbols
+        merged.liveRingSegments = received.liveRingSegments
+        merged.key = received.key
+        merged.isKeyAutoDetected = received.isKeyAutoDetected
+        merged.beatsOnActiveChord = received.beatsOnActiveChord
+        merged.isPianoActive = received.isPianoActive
+        merged.hasInferredLiveProgression = received.hasInferredLiveProgression
+        return merged
+    }
+}
+
+/// Fields that drive local metronome playback on guests.
+struct MetronomeSyncSignature: Equatable, Sendable {
+    var tempoBPM: Double
+    var beatsPerBar: Int
+    var beatUnit: Int
+    var isMetronomePlaying: Bool
+    var metronomeStartEpoch: Double?
+    var countInBars: Int
+    var isCountingIn: Bool
+    var countInStartEpoch: Double?
+    var countInBeatsRemaining: Int
+}
+
+enum SessionMessageCodec {
+    static func encode(_ message: SessionMessage) -> Data? {
+        try? JSONEncoder().encode(message)
+    }
+
+    static func decode(_ data: Data) -> SessionMessage? {
+        try? JSONDecoder().decode(SessionMessage.self, from: data)
+    }
 }
 
 /// One round-trip sample used to estimate the clock offset between a guest and
@@ -370,9 +576,22 @@ struct TimeSyncPing: Codable, Sendable {
     var hostEpoch: Double?
 }
 
+/// Ultra-compact live chord update — avoids encoding the full session payload on every MIDI event.
+struct LiveChordWire: Codable, Sendable, Equatable {
+    var sessionToken: UUID
+    var revision: UInt64
+    var liveChordSymbol: String?
+    var pianoNotes: [Int]
+    var freestyleChordSymbols: [String]
+    var key: MusicalKey
+    var isKeyAutoDetected: Bool
+    var isPianoActive: Bool
+}
+
 /// Everything that travels over the peer connection.
 enum SessionMessage: Codable, Sendable {
     case state(SessionSyncPayload)
+    case liveChord(LiveChordWire)
     case timeSyncRequest(TimeSyncPing)
     case timeSyncResponse(TimeSyncPing)
     case controlRequest(SessionControlAction)
@@ -480,7 +699,7 @@ enum Transposer {
     }
 }
 
-struct TimeSignature: Identifiable, Equatable, Sendable {
+struct TimeSignature: Identifiable, Equatable, Hashable, Sendable {
     let beats: Int
     let unit: Int
 
@@ -616,6 +835,50 @@ enum ChordTheory {
     }
 }
 
+/// Normalizes live-played chord symbols so duplicates and inversions collapse to one bubble.
+enum LiveRing {
+    /// Chords shown on the live ring (keeps the UI readable).
+    static let maxDisplayChords = 6
+    static let maxChordsPerRing = maxDisplayChords
+    static let maxStoredRings = 6
+    static let maxLiveProgressionChords = 16
+
+    /// Ranks normalized symbols by play count, then recency; returns display spellings.
+    static func rankedDisplaySymbols(
+        counts: [String: Int],
+        recentOrder: [String],
+        canonicalByNormalized: [String: String],
+        maxCount: Int = maxDisplayChords
+    ) -> [String] {
+        guard !counts.isEmpty else { return [] }
+        let ranked = counts.keys.sorted { lhs, rhs in
+            let leftCount = counts[lhs] ?? 0
+            let rightCount = counts[rhs] ?? 0
+            if leftCount != rightCount { return leftCount > rightCount }
+            let leftRecency = recentOrder.lastIndex(of: lhs) ?? -1
+            let rightRecency = recentOrder.lastIndex(of: rhs) ?? -1
+            return leftRecency > rightRecency
+        }
+        return ranked.prefix(maxCount).map { canonicalByNormalized[$0] ?? $0 }
+    }
+
+    /// Compares chord symbols for ring deduplication (ignores slash bass and spacing).
+    static func matches(_ a: String, _ b: String) -> Bool {
+        normalize(a) == normalize(b)
+    }
+
+    static func contains(_ symbol: String, in ring: [String]) -> Bool {
+        ring.contains { matches($0, symbol) }
+    }
+
+    static func normalize(_ symbol: String) -> String {
+        let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let base = trimmed.split(separator: "/", maxSplits: 1).first.map(String.init) ?? trimmed
+        return base
+    }
+}
+
 /// Guesses a chord name from a set of sounding pitch classes (e.g. live MIDI input).
 enum ChordRecognizer {
     /// Chord templates as intervals above the root. Ordered larger-first so the
@@ -708,9 +971,42 @@ enum ChordRecognizer {
 
 /// Helpers for naming piano keys by absolute semitone index (0 = C0).
 enum PianoNote {
+    /// MIDI note number offset (MIDI 12 = internal index 0 = C0).
+    static let midiOffset = 12
+
+    static func fromMIDINote(_ midi: Int) -> Int { midi - midiOffset }
+
+    /// Internal index range: A0 (9) through C8 (96) — full 88-key piano.
+    static let keyboardRange = 9...96
+
+    /// On-screen live keyboard shows the full 88-key span (scrollable on all platforms).
+    static let liveKeyboardRange = keyboardRange
+
+    /// MIDI note numbers for the 88-key span (A0=21 … C8=108).
+    static let keyboardMIDIRange = 21...108
+
+    /// Default scroll anchor when no notes are held (middle C).
+    static let middleC = 48
+
+    /// Convert incoming value (legacy MIDI storage or internal) to internal index.
+    static func normalizeToInternal(_ value: Int) -> Int {
+        if keyboardRange.contains(value) { return value }
+        if keyboardMIDIRange.contains(value) { return fromMIDINote(value) }
+        return value
+    }
+
+    static func toMIDI(_ internalIndex: Int) -> Int { internalIndex + midiOffset }
+
     static func pitchClass(of index: Int) -> Int { ((index % 12) + 12) % 12 }
+
+    static func pitchClass(forStored value: Int) -> Int {
+        pitchClass(of: normalizeToInternal(value))
+    }
+
     static func octave(of index: Int) -> Int { index / 12 }
     static func isBlack(_ index: Int) -> Bool { [1, 3, 6, 8, 10].contains(pitchClass(of: index)) }
+
+    static func isBlackMIDI(_ midi: Int) -> Bool { isBlack(fromMIDINote(midi)) }
 
     static func name(of index: Int, preferFlats: Bool, includeOctave: Bool = false) -> String {
         let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
@@ -718,8 +1014,21 @@ enum PianoNote {
         return includeOctave ? "\(base)\(octave(of: index))" : base
     }
 
+    static func name(forStored value: Int, preferFlats: Bool, includeOctave: Bool = false) -> String {
+        name(of: normalizeToInternal(value), preferFlats: preferFlats, includeOctave: includeOctave)
+    }
+
     static func latinName(of index: Int, preferFlats: Bool) -> String {
         let symbol = (preferFlats ? Transposer.flatNames : Transposer.sharpNames)[pitchClass(of: index)]
         return ChordCatalog.latinName(forSymbol: symbol)
+    }
+
+    static func latinName(forStored value: Int, preferFlats: Bool) -> String {
+        latinName(of: normalizeToInternal(value), preferFlats: preferFlats)
+    }
+
+    static func keyboardLabel(for index: Int, preferFlats: Bool) -> String {
+        let showOctave = pitchClass(of: index) == 0 || isBlack(index)
+        return name(of: index, preferFlats: preferFlats, includeOctave: showOctave)
     }
 }

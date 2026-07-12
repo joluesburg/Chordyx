@@ -29,6 +29,13 @@ struct InstrumentView: View {
         return ChordTheory.tones(for: symbol)
     }
 
+    /// Bass shows only the chord root; guitar shows full chord tones.
+    private var fretboardPitchClasses: Set<Int> {
+        guard let tones = chordTones else { return [] }
+        if instrument.isBass { return [tones.root] }
+        return tones.pitchClasses
+    }
+
     var body: some View {
         ZStack {
             AppTheme.backgroundGradient.ignoresSafeArea()
@@ -171,7 +178,7 @@ struct InstrumentView: View {
         FretboardView(
             instrument: instrument,
             bassStrings: viewModel.payload.bassStrings,
-            pitchClasses: chordTones?.pitchClasses ?? [],
+            pitchClasses: fretboardPitchClasses,
             rootPitchClass: chordTones?.root,
             preferFlats: preferFlats,
             isCompactHeight: isCompactHeight
@@ -314,7 +321,9 @@ struct InstrumentView: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: viewModel.payload.fretChordID)
 
             if !isCompactHeight {
-                Text("Chord tones on the \(instrument.label.lowercased())")
+                Text(instrument.isBass
+                      ? String(localized: "Root note on the bass")
+                      : String(localized: "Chord tones on the \(instrument.label.lowercased())"))
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
             }
@@ -338,8 +347,10 @@ struct InstrumentView: View {
 
     private var legend: some View {
         HStack(spacing: isCompactHeight ? 12 : 18) {
-            legendDot(color: AppTheme.accent, label: "Root")
-            legendDot(color: AppTheme.accentSecondary, label: "Chord tone")
+            legendDot(color: AppTheme.accent, label: String(localized: "Root"))
+            if !instrument.isBass {
+                legendDot(color: AppTheme.accentSecondary, label: String(localized: "Chord tone"))
+            }
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(AppTheme.textSecondary)

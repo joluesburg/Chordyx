@@ -31,7 +31,20 @@ struct PianoView: View {
     }
 
     private var rootPitchClass: Int? {
-        activeNotes.min().map { PianoNote.pitchClass(forStored: $0) }
+        if let symbol = viewModel.payload.liveChordSymbol,
+           let tones = ChordTheory.tones(for: symbol) {
+            return tones.root
+        }
+        return activeNotes.min().map { PianoNote.pitchClass(forStored: $0) }
+    }
+
+    /// Bass guests only see the chord root; guitar gets full chord tones.
+    private var fretboardPitchClasses: Set<Int> {
+        if guestInstrument == .bass {
+            if let root = rootPitchClass { return [root] }
+            return []
+        }
+        return pitchClasses
     }
 
     private var showFretboardForGuest: Bool {
@@ -81,7 +94,7 @@ struct PianoView: View {
                     FretboardView(
                         instrument: fret,
                         bassStrings: guestBassStrings,
-                        pitchClasses: pitchClasses,
+                        pitchClasses: fretboardPitchClasses,
                         rootPitchClass: rootPitchClass,
                         preferFlats: preferFlats,
                         isCompactHeight: isCompactHeight
@@ -291,8 +304,13 @@ struct PianoView: View {
 
         let pitchClasses = Set(sorted.map { PianoNote.pitchClass(forStored: $0) })
         let bass = sorted.first.map { PianoNote.pitchClass(forStored: $0) }
-        let recognized = ChordRecognizer.symbol(forPitchClasses: pitchClasses, bassPitchClass: bass, preferFlats: preferFlats)
-            ?? sorted.first.map { viewModel.singleNoteSymbol(for: $0) }
+        let recognizedFromKeys = ChordRecognizer.symbol(
+            forPitchClasses: pitchClasses,
+            bassPitchClass: bass,
+            preferFlats: preferFlats
+        ) ?? sorted.first.map { viewModel.singleNoteSymbol(for: $0) }
+        // Prefer the stabilized session chord so brief finger lifts don't chop the label.
+        let recognized = viewModel.payload.liveChordSymbol ?? recognizedFromKeys
         let chordName = recognized.map { symbol in
             switch notation {
             case .latin: ChordCatalog.latinName(forSymbol: symbol)
@@ -304,9 +322,13 @@ struct PianoView: View {
 
         let primary = chordName ?? (names.isEmpty ? "—" : names.joined(separator: "  ·  "))
         let secondary: String = {
-            if names.isEmpty { return "No note selected" }
+            if names.isEmpty {
+                return chordName != nil
+                    ? String(localized: "Last chord")
+                    : String(localized: "No note selected")
+            }
             if chordName != nil { return names.joined(separator: "  ·  ") }
-            return "Now showing"
+            return String(localized: "Now showing")
         }()
 
         let primaryText: Text = {
@@ -319,8 +341,9 @@ struct PianoView: View {
         return VStack(spacing: 6) {
             primaryText
                 .foregroundStyle(AppTheme.accent)
-                .minimumScaleFactor(0.4)
-                .lineLimit(1)
+                .minimumScaleFactor(0.35)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
                 .transaction { transaction in
                     if isHost {
                         transaction.animation = nil
@@ -332,17 +355,19 @@ struct PianoView: View {
                 .foregroundStyle(AppTheme.textSecondary)
                 .textCase(chordName == nil ? .uppercase : nil)
                 .tracking(chordName == nil ? 1.1 : 0)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .padding(.vertical, isCompactHeight ? 12 : 24)
         .padding(.horizontal, 20)
         .glassCard()
         .padding(.horizontal, 20)
     }
 }
 
-/// C2–C6 live keyboard. Scrolls horizontally on every device so bass key labels stay readable.
+/// Full 88-key piano (A0–C8). Scrolls horizontally on every platform.
 struct ScrollablePianoKeyboard: View {
     let activeNotes: Set<Int>
     let preferFlats: Bool
@@ -350,7 +375,7 @@ struct ScrollablePianoKeyboard: View {
     let onTap: (Int) -> Void
 
     private let whiteKeyWidth: CGFloat = 46
-    private let noteRange = PianoNote.liveKeyboardRange
+    private let noteRange = PianoNote.keyboardRange
 
     private var keyboardWidth: CGFloat {
         let whiteCount = noteRange.filter { !PianoNote.isBlack($0) }.count
@@ -361,12 +386,12 @@ struct ScrollablePianoKeyboard: View {
         if let lowest = notes.filter({ noteRange.contains($0) }).min() {
             return lowest
         }
-        return noteRange.lowerBound
+        return PianoNote.middleC
     }
 
     private func scrollToActiveNotes(_ proxy: ScrollViewProxy, notes: Set<Int>, animated: Bool) {
         let target = scrollTarget(for: notes)
-        let action = { proxy.scrollTo(target, anchor: .leading) }
+        let action = { proxy.scrollTo(target, anchor: .center) }
         if animated {
             withAnimation(.easeInOut(duration: 0.25), action)
         } else {
@@ -376,7 +401,7 @@ struct ScrollablePianoKeyboard: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: true) {
                 PianoKeyboard(
                     activeNotes: activeNotes,
                     preferFlats: preferFlats,
@@ -399,19 +424,19 @@ struct ScrollablePianoKeyboard: View {
     }
 }
 
-/// Piano keyboard using internal note indices (0 = C0). C2 = 24, C#2 = 25.
+/// Piano keyboard using internal note indices (0 = C0). Full span A0 (9) … C8 (96).
 struct PianoKeyboard: View {
     let activeNotes: Set<Int>
     let preferFlats: Bool
     let isInteractive: Bool
-    var noteRange: ClosedRange<Int> = PianoNote.liveKeyboardRange
+    var noteRange: ClosedRange<Int> = PianoNote.keyboardRange
     let onTap: (Int) -> Void
 
     init(
         activeNotes: Set<Int>,
         preferFlats: Bool,
         isInteractive: Bool,
-        noteRange: ClosedRange<Int> = PianoNote.liveKeyboardRange,
+        noteRange: ClosedRange<Int> = PianoNote.keyboardRange,
         onTap: @escaping (Int) -> Void
     ) {
         self.activeNotes = activeNotes

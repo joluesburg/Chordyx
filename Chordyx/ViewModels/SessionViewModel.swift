@@ -76,6 +76,7 @@ final class SessionViewModel {
     private var guestReconnectInProgress = false
     private var midiSyncTask: Task<Void, Never>?
     private var pianoSideEffectsTask: Task<Void, Never>?
+    private var liveChordSymbolClearTask: Task<Void, Never>?
     var groovePreviewTask: Task<Void, Never>?
     private var outboundSyncTask: Task<Void, Never>?
     private var outboundSyncNeedsFull = false
@@ -96,7 +97,10 @@ final class SessionViewModel {
     private var keyUsedForAutoDetection: MusicalKey?
     private let progressionInference = ProgressionInferenceEngine()
     /// True after a repeating live loop was auto-applied to `payload.chords`.
-    private(set) var hasInferredLiveProgression = false
+    var hasInferredLiveProgression: Bool {
+        get { payload.hasInferredLiveProgression }
+        set { payload.hasInferredLiveProgression = newValue }
+    }
     private(set) var inferredProgressionConfidence: Double = 0
     private var inferredOutOfCycleHits = 0
     var autoAdvanceSetlistSongs = false
@@ -441,7 +445,9 @@ final class SessionViewModel {
             }
         }
         midi.onNotesChanged = { [weak self] notes in
-            self?.handleMIDINotes(notes)
+            Task { @MainActor in
+                self?.handleMIDINotes(notes)
+            }
         }
         midi.onSourcesChanged = { [weak self] names in
             self?.midiSources = names
@@ -679,9 +685,17 @@ final class SessionViewModel {
             .filter { PianoNote.keyboardRange.contains($0) }
 
         let priorSymbol = payload.liveChordSymbol
-        payload.pianoNotes = notes
+        // Reassign payload so @Observable reliably refreshes PianoView key highlights.
+        var nextPayload = payload
+        nextPayload.pianoNotes = notes
+        payload = nextPayload
 
-        if !notes.isEmpty {
+        if notes.isEmpty {
+            // Hold the last chord briefly so note-off / finger lifts don't chop the display.
+            scheduleLiveChordSymbolClear()
+        } else {
+            liveChordSymbolClearTask?.cancel()
+            liveChordSymbolClearTask = nil
             updateLiveChordSymbol(from: notes)
         }
 
@@ -700,6 +714,19 @@ final class SessionViewModel {
         }
 
         schedulePianoSideEffects(notes: notes)
+    }
+
+    private func scheduleLiveChordSymbolClear() {
+        liveChordSymbolClearTask?.cancel()
+        liveChordSymbolClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard let self, !Task.isCancelled else { return }
+            guard self.payload.pianoNotes.isEmpty else { return }
+            guard !self.payload.hasInferredLiveProgression else { return }
+            guard self.payload.liveChordSymbol != nil else { return }
+            self.payload.liveChordSymbol = nil
+            self.syncLiveCoalesced()
+        }
     }
 
     private func schedulePianoSideEffects(notes: [Int]) {
@@ -722,6 +749,16 @@ final class SessionViewModel {
     private func updateLiveChordSymbol(from indices: [Int]) {
         let pitchClasses = Set(indices.map { PianoNote.pitchClass(forStored: $0) })
         let bass = indices.min().map { PianoNote.pitchClass(forStored: $0) }
+
+        // Don't downgrade a held chord when some fingers lift briefly (subset of the same tones).
+        if let existing = payload.liveChordSymbol,
+           let existingTones = ChordTheory.tones(for: existing),
+           !pitchClasses.isEmpty,
+           pitchClasses.isSubset(of: existingTones.pitchClasses),
+           pitchClasses.count < existingTones.pitchClasses.count {
+            return
+        }
+
         let symbol: String?
         if pitchClasses.count == 1, let pc = pitchClasses.first {
             let names = payload.key.prefersFlats ? Transposer.flatNames : Transposer.sharpNames
@@ -1024,7 +1061,7 @@ final class SessionViewModel {
         inferredProgressionConfidence = inference.confidence
         inferredOutOfCycleHits = 0
         updateActiveSection()
-        syncLiveImmediate()
+        sync()
     }
 
     private func advanceInferredProgression(with symbol: String) {
@@ -1040,12 +1077,14 @@ final class SessionViewModel {
                 payload.activeChordID = nil
                 payload.beatsOnActiveChord = 0
                 updateActiveSection()
+                sync()
             }
             return
         }
 
         inferredOutOfCycleHits = 0
 
+        let priorActiveID = payload.activeChordID
         if let activeID = payload.activeChordID,
            let activeIndex = chords.firstIndex(where: { $0.id == activeID }) {
             let expectedNext = (activeIndex + 1) % chords.count
@@ -1053,6 +1092,9 @@ final class SessionViewModel {
                 payload.activeChordID = chords[matchIndex].id
                 payload.beatsOnActiveChord = 0
                 updateActiveSection()
+                if payload.activeChordID != priorActiveID {
+                    sync()
+                }
                 return
             }
         }
@@ -1060,6 +1102,9 @@ final class SessionViewModel {
         payload.activeChordID = chords[matchIndex].id
         payload.beatsOnActiveChord = 0
         updateActiveSection()
+        if payload.activeChordID != priorActiveID {
+            sync()
+        }
     }
 
     private func clearInferredLiveProgression(resetEngine: Bool) {
@@ -1731,9 +1776,6 @@ final class SessionViewModel {
     func setPerformanceMode(_ mode: SessionPerformanceMode) {
         guard canDriveSession else { return }
         payload.performanceMode = mode
-        if mode == .live, payload.displayMode == .ring {
-            payload.displayMode = .stage
-        }
         sync()
     }
 
@@ -2465,6 +2507,8 @@ final class SessionViewModel {
         transitionTask = nil
         pianoSideEffectsTask?.cancel()
         pianoSideEffectsTask = nil
+        liveChordSymbolClearTask?.cancel()
+        liveChordSymbolClearTask = nil
         cueClearTask?.cancel()
         cueClearTask = nil
         songEndingTask?.cancel()
