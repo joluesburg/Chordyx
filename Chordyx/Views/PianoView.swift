@@ -68,14 +68,18 @@ struct PianoView: View {
 
     private var instrumentBoardHeight: CGFloat {
         if isCompactHeight { return 150 }
-        return showsFullPianoKeyboard ? 280 : 240
+        #if os(macOS)
+        return 420
+        #else
+        return showsFullPianoKeyboard ? 320 : 240
+        #endif
     }
 
     var body: some View {
         ZStack {
             AppTheme.backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: isCompactHeight ? 10 : 20) {
+            VStack(spacing: isCompactHeight ? 10 : 16) {
                 header
 
                 if isHost {
@@ -86,10 +90,6 @@ struct PianoView: View {
 
                 noteDisplay
 
-                if !showsFullPianoKeyboard && !isCompactHeight {
-                    Spacer()
-                }
-
                 if showFretboardForGuest, let fret = guestInstrument.fretInstrument {
                     FretboardView(
                         instrument: fret,
@@ -99,10 +99,10 @@ struct PianoView: View {
                         preferFlats: preferFlats,
                         isCompactHeight: isCompactHeight
                     )
-                    .frame(height: instrumentBoardHeight)
-                    .frame(maxHeight: isCompactHeight ? instrumentBoardHeight : (showsFullPianoKeyboard ? .infinity : 240))
+                    .frame(minHeight: instrumentBoardHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
-                    .padding(.horizontal, showsFullPianoKeyboard || isCompactHeight ? 12 : 12)
+                    .padding(.horizontal, 12)
                 } else {
                     ScrollablePianoKeyboard(
                         activeNotes: activeNoteSet,
@@ -110,10 +110,10 @@ struct PianoView: View {
                         isInteractive: isHost,
                         onTap: { viewModel.playPianoNote($0) }
                     )
-                    .frame(height: instrumentBoardHeight)
-                    .frame(maxHeight: isCompactHeight ? instrumentBoardHeight : (showsFullPianoKeyboard ? .infinity : 240))
-                    .layoutPriority(showsFullPianoKeyboard || isCompactHeight ? 1 : 0)
-                    .padding(.horizontal, showsFullPianoKeyboard ? 16 : 12)
+                    .frame(minHeight: instrumentBoardHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                    .padding(.horizontal, showsFullPianoKeyboard ? 20 : 12)
                 }
 
                 if isHost {
@@ -125,12 +125,6 @@ struct PianoView: View {
                     Label("Following the host · your view", systemImage: "dot.radiowaves.left.and.right")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AppTheme.accentSecondary)
-                }
-
-                if showsFullPianoKeyboard && !isCompactHeight {
-                    Spacer(minLength: 12)
-                } else if !isCompactHeight {
-                    Spacer(minLength: 8)
                 }
             }
             .padding(.vertical, isCompactHeight ? 8 : (showsFullPianoKeyboard ? 16 : 24))
@@ -360,20 +354,21 @@ struct PianoView: View {
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, isCompactHeight ? 12 : 24)
+        .padding(.vertical, isCompactHeight ? 8 : 14)
         .padding(.horizontal, 20)
         .glassCard()
         .padding(.horizontal, 20)
     }
 }
 
-/// Full 88-key piano (A0–C8). Scrolls horizontally on every platform.
+/// Full 88-key piano (A0–C8). Keeps comfortable key width and scrolls for the rest.
 struct ScrollablePianoKeyboard: View {
     let activeNotes: Set<Int>
     let preferFlats: Bool
     let isInteractive: Bool
     let onTap: (Int) -> Void
 
+    /// Comfortable white-key width — do not shrink to fit all 88 keys on screen.
     private let whiteKeyWidth: CGFloat = 46
     private let noteRange = PianoNote.keyboardRange
 
@@ -400,25 +395,29 @@ struct ScrollablePianoKeyboard: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: true) {
-                PianoKeyboard(
-                    activeNotes: activeNotes,
-                    preferFlats: preferFlats,
-                    isInteractive: isInteractive,
-                    noteRange: noteRange,
-                    onTap: onTap
-                )
-                .frame(width: max(keyboardWidth, 320))
-            }
-            .onAppear {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(100))
-                    scrollToActiveNotes(proxy, notes: activeNotes, animated: false)
+        GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: true) {
+                    PianoKeyboard(
+                        activeNotes: activeNotes,
+                        preferFlats: preferFlats,
+                        isInteractive: isInteractive,
+                        noteRange: noteRange,
+                        onTap: onTap
+                    )
+                    // Wide enough for all 88 keys at fixed key size; viewport shows as many as fit.
+                    .frame(width: max(keyboardWidth, geo.size.width), height: geo.size.height)
                 }
-            }
-            .onChange(of: activeNotes) { _, newNotes in
-                scrollToActiveNotes(proxy, notes: newNotes, animated: false)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .onAppear {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        scrollToActiveNotes(proxy, notes: activeNotes, animated: false)
+                    }
+                }
+                .onChange(of: activeNotes) { _, newNotes in
+                    scrollToActiveNotes(proxy, notes: newNotes, animated: false)
+                }
             }
         }
     }

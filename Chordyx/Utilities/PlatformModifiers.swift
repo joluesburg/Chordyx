@@ -208,15 +208,11 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
         #if os(macOS)
         if let onDismiss {
             content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
-                sheetContent()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(AppTheme.backgroundGradient.ignoresSafeArea())
+                macPianoSheetBody
             }
         } else {
             content.sheet(isPresented: $isPresented) {
-                sheetContent()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(AppTheme.backgroundGradient.ignoresSafeArea())
+                macPianoSheetBody
             }
         }
         #else
@@ -245,6 +241,15 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
         }
         #endif
     }
+    #if os(macOS)
+    /// Wide sheet so many fixed-size keys fit on MacBook / studio displays.
+    private var macPianoSheetBody: some View {
+        sheetContent()
+            .frame(minWidth: 1180, idealWidth: 1480, maxWidth: .infinity,
+                   minHeight: 720, idealHeight: 900, maxHeight: .infinity)
+            .background(AppTheme.backgroundGradient.ignoresSafeArea())
+    }
+    #endif
 }
 
 struct PlatformEditButton: View {
@@ -355,4 +360,16 @@ enum PlatformLayout {
         horizontalSizeClass == .regular ? 40 : 20
         #endif
     }
+
+    /// Comfortable fixed-width keys with horizontal scroll (Mac/iPad get a wide sheet to show more keys).
+    static func usesFullPianoKeyboard(horizontalSizeClass: UserInterfaceSizeClass?) -> Bool {
+        #if os(macOS)
+        true
+        #elseif os(iOS)
+        !PlatformDevice.isPhone
+        #else
+        false
+        #endif
+    }
 }
+
