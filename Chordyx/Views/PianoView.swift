@@ -15,7 +15,11 @@ struct PianoView: View {
 
     private var isHost: Bool { viewModel.role == .host }
     private var preferFlats: Bool { viewModel.payload.key.prefersFlats }
-    private var activeNotes: [Int] { viewModel.payload.pianoNotes }
+    private var activeNotes: [Int] {
+        viewModel.payload.pianoNotes.map { PianoNote.normalizeToInternal($0) }
+    }
+
+    private var activeNoteSet: Set<Int> { Set(activeNotes) }
 
     // Guests render on the host's piano by default, but can switch locally.
     private var guestInstrument: ViewInstrument {
@@ -23,11 +27,11 @@ struct PianoView: View {
     }
 
     private var pitchClasses: Set<Int> {
-        Set(activeNotes.map { PianoNote.pitchClass(of: $0) })
+        Set(activeNotes.map { PianoNote.pitchClass(forStored: $0) })
     }
 
     private var rootPitchClass: Int? {
-        activeNotes.min().map { PianoNote.pitchClass(of: $0) }
+        activeNotes.min().map { PianoNote.pitchClass(forStored: $0) }
     }
 
     private var showFretboardForGuest: Bool {
@@ -39,20 +43,26 @@ struct PianoView: View {
     }
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private var showsFullPianoKeyboard: Bool {
-        #if os(macOS)
-        true
-        #else
-        horizontalSizeClass == .regular
-        #endif
+        PlatformLayout.usesFullPianoKeyboard(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    private var isCompactHeight: Bool {
+        verticalSizeClass == .compact
+    }
+
+    private var instrumentBoardHeight: CGFloat {
+        if isCompactHeight { return 150 }
+        return showsFullPianoKeyboard ? 280 : 240
     }
 
     var body: some View {
         ZStack {
             AppTheme.backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            VStack(spacing: isCompactHeight ? 10 : 20) {
                 header
 
                 if isHost {
@@ -63,7 +73,7 @@ struct PianoView: View {
 
                 noteDisplay
 
-                if !showsFullPianoKeyboard {
+                if !showsFullPianoKeyboard && !isCompactHeight {
                     Spacer()
                 }
 
@@ -73,21 +83,23 @@ struct PianoView: View {
                         bassStrings: guestBassStrings,
                         pitchClasses: pitchClasses,
                         rootPitchClass: rootPitchClass,
-                        preferFlats: preferFlats
+                        preferFlats: preferFlats,
+                        isCompactHeight: isCompactHeight
                     )
-                    .frame(height: showsFullPianoKeyboard ? 280 : 240)
-                    .frame(maxHeight: showsFullPianoKeyboard ? .infinity : 240)
-                    .padding(.horizontal, showsFullPianoKeyboard ? 16 : 12)
+                    .frame(height: instrumentBoardHeight)
+                    .frame(maxHeight: isCompactHeight ? instrumentBoardHeight : (showsFullPianoKeyboard ? .infinity : 240))
+                    .layoutPriority(1)
+                    .padding(.horizontal, showsFullPianoKeyboard || isCompactHeight ? 12 : 12)
                 } else {
                     ScrollablePianoKeyboard(
-                        activeNotes: Set(activeNotes),
+                        activeNotes: activeNoteSet,
                         preferFlats: preferFlats,
                         isInteractive: isHost,
                         onTap: { viewModel.playPianoNote($0) }
                     )
-                    .frame(height: showsFullPianoKeyboard ? 280 : 240)
-                    .frame(maxHeight: showsFullPianoKeyboard ? .infinity : 240)
-                    .layoutPriority(showsFullPianoKeyboard ? 1 : 0)
+                    .frame(height: instrumentBoardHeight)
+                    .frame(maxHeight: isCompactHeight ? instrumentBoardHeight : (showsFullPianoKeyboard ? .infinity : 240))
+                    .layoutPriority(showsFullPianoKeyboard || isCompactHeight ? 1 : 0)
                     .padding(.horizontal, showsFullPianoKeyboard ? 16 : 12)
                 }
 
@@ -102,13 +114,13 @@ struct PianoView: View {
                         .foregroundStyle(AppTheme.accentSecondary)
                 }
 
-                if showsFullPianoKeyboard {
+                if showsFullPianoKeyboard && !isCompactHeight {
                     Spacer(minLength: 12)
-                } else {
+                } else if !isCompactHeight {
                     Spacer(minLength: 8)
                 }
             }
-            .padding(.vertical, showsFullPianoKeyboard ? 16 : 24)
+            .padding(.vertical, isCompactHeight ? 8 : (showsFullPianoKeyboard ? 16 : 24))
         }
         .preferredColorScheme(.dark)
     }
@@ -123,46 +135,55 @@ struct PianoView: View {
 
     private var guestInstrumentPicker: some View {
         VStack(spacing: 10) {
-            Picker("View as", selection: Binding(
-                get: { guestGroup },
-                set: { group in
-                    switch group {
-                    case "piano": guestInstrumentRaw = ViewInstrument.piano.rawValue
-                    case "bass": guestInstrumentRaw = ViewInstrument.bass.rawValue
-                    default:
-                        if guestGroup != "guitar" {
-                            guestInstrumentRaw = ViewInstrument.acoustic.rawValue
+            PlatformSegmentedPicker(
+                "View as",
+                selection: Binding(
+                    get: { guestGroup },
+                    set: { group in
+                        switch group {
+                        case "piano": guestInstrumentRaw = ViewInstrument.piano.rawValue
+                        case "bass": guestInstrumentRaw = ViewInstrument.bass.rawValue
+                        default:
+                            if guestGroup != "guitar" {
+                                guestInstrumentRaw = ViewInstrument.acoustic.rawValue
+                            }
                         }
                     }
-                }
-            )) {
-                Text("Piano").tag("piano")
-                Text("Guitar").tag("guitar")
-                Text("Bass").tag("bass")
-            }
-            .pickerStyle(.segmented)
+                ),
+                stringOptions: [
+                    ("piano", "Piano"),
+                    ("guitar", "Guitar"),
+                    ("bass", "Bass")
+                ]
+            )
 
             if guestGroup == "guitar" {
-                Picker("Type", selection: Binding(
-                    get: { guestInstrument },
-                    set: { guestInstrumentRaw = $0.rawValue }
-                )) {
-                    Text("Acoustic").tag(ViewInstrument.acoustic)
-                    Text("Electric").tag(ViewInstrument.electric)
-                }
-                .pickerStyle(.segmented)
+                PlatformSegmentedPicker(
+                    "Type",
+                    selection: Binding(
+                        get: { guestInstrument },
+                        set: { guestInstrumentRaw = $0.rawValue }
+                    ),
+                    stringOptions: [
+                        (ViewInstrument.acoustic, "Acoustic"),
+                        (ViewInstrument.electric, "Electric")
+                    ]
+                )
             }
 
             if guestInstrument == .bass {
-                Picker("Strings", selection: Binding(
-                    get: { guestBassStrings },
-                    set: { guestBassStrings = $0 }
-                )) {
-                    ForEach([4, 5, 6], id: \.self) { count in
-                        Text("\(count) strings").tag(count)
-                    }
-                }
-                .pickerStyle(.segmented)
+                PlatformSegmentedPicker(
+                    "Strings",
+                    selection: Binding(
+                        get: { guestBassStrings },
+                        set: { guestBassStrings = $0 }
+                    ),
+                    stringOptions: [
+                        (4, "4 strings"),
+                        (5, "5 strings"),
+                        (6, "6 strings")
+                    ]
+                )
             }
         }
         .padding(.horizontal, 20)
@@ -257,19 +278,19 @@ struct PianoView: View {
         let names = sorted.map { index in
             switch notation {
             case .latin:
-                PianoNote.latinName(of: index, preferFlats: preferFlats)
+                PianoNote.latinName(forStored: index, preferFlats: preferFlats)
             case .nashville:
                 NashvilleConverter.number(
                     for: viewModel.singleNoteSymbol(for: index),
                     in: viewModel.payload.key
                 )
             case .symbol:
-                PianoNote.name(of: index, preferFlats: preferFlats, includeOctave: true)
+                PianoNote.name(forStored: index, preferFlats: preferFlats, includeOctave: true)
             }
         }
 
-        let pitchClasses = Set(sorted.map { PianoNote.pitchClass(of: $0) })
-        let bass = sorted.first.map { PianoNote.pitchClass(of: $0) }
+        let pitchClasses = Set(sorted.map { PianoNote.pitchClass(forStored: $0) })
+        let bass = sorted.first.map { PianoNote.pitchClass(forStored: $0) }
         let recognized = ChordRecognizer.symbol(forPitchClasses: pitchClasses, bassPitchClass: bass, preferFlats: preferFlats)
             ?? sorted.first.map { viewModel.singleNoteSymbol(for: $0) }
         let chordName = recognized.map { symbol in
@@ -300,7 +321,11 @@ struct PianoView: View {
                 .foregroundStyle(AppTheme.accent)
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: activeNotes)
+                .transaction { transaction in
+                    if isHost {
+                        transaction.animation = nil
+                    }
+                }
 
             Text(secondary)
                 .font(.caption.weight(.medium))
@@ -317,90 +342,76 @@ struct PianoView: View {
     }
 }
 
-/// Full 88-key piano (A0–C8). On iPad and Mac the entire keyboard fits the width;
-/// on iPhone it scrolls horizontally and auto-centers on active notes.
+/// C2–C6 live keyboard. Scrolls horizontally on every device so bass key labels stay readable.
 struct ScrollablePianoKeyboard: View {
     let activeNotes: Set<Int>
     let preferFlats: Bool
     let isInteractive: Bool
     let onTap: (Int) -> Void
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
-    private var showsFullKeyboard: Bool {
-        #if os(macOS)
-        true
-        #else
-        horizontalSizeClass == .regular
-        #endif
-    }
-
-    private let whiteKeyWidth: CGFloat = 36
+    private let whiteKeyWidth: CGFloat = 46
+    private let noteRange = PianoNote.liveKeyboardRange
 
     private var keyboardWidth: CGFloat {
-        CGFloat(PianoKeyboard.defaultRange.filter { !PianoNote.isBlack($0) }.count) * whiteKeyWidth
+        let whiteCount = noteRange.filter { !PianoNote.isBlack($0) }.count
+        return CGFloat(whiteCount) * whiteKeyWidth
     }
 
-    /// The white key nearest the center of the active notes, used as scroll target.
-    private func scrollTarget(for notes: Set<Int>) -> Int? {
-        guard let low = notes.min(), let high = notes.max() else { return nil }
-        var center = (low + high) / 2
-        center = min(max(center, PianoKeyboard.defaultRange.lowerBound), PianoKeyboard.defaultRange.upperBound)
-        while PianoNote.isBlack(center) { center -= 1 }
-        return center
+    private func scrollTarget(for notes: Set<Int>) -> Int {
+        if let lowest = notes.filter({ noteRange.contains($0) }).min() {
+            return lowest
+        }
+        return noteRange.lowerBound
+    }
+
+    private func scrollToActiveNotes(_ proxy: ScrollViewProxy, notes: Set<Int>, animated: Bool) {
+        let target = scrollTarget(for: notes)
+        let action = { proxy.scrollTo(target, anchor: .leading) }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.25), action)
+        } else {
+            action()
+        }
     }
 
     var body: some View {
-        if showsFullKeyboard {
-            PianoKeyboard(
-                activeNotes: activeNotes,
-                preferFlats: preferFlats,
-                isInteractive: isInteractive,
-                onTap: onTap
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    PianoKeyboard(
-                        activeNotes: activeNotes,
-                        preferFlats: preferFlats,
-                        isInteractive: isInteractive,
-                        onTap: onTap
-                    )
-                    .frame(width: keyboardWidth)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                PianoKeyboard(
+                    activeNotes: activeNotes,
+                    preferFlats: preferFlats,
+                    isInteractive: isInteractive,
+                    noteRange: noteRange,
+                    onTap: onTap
+                )
+                .frame(width: max(keyboardWidth, 320))
+            }
+            .onAppear {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    scrollToActiveNotes(proxy, notes: activeNotes, animated: false)
                 }
-                .onAppear {
-                    proxy.scrollTo(scrollTarget(for: activeNotes) ?? 48, anchor: .center)
-                }
-                .onChange(of: activeNotes) { _, newNotes in
-                    guard let target = scrollTarget(for: newNotes) else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(target, anchor: .center)
-                    }
-                }
+            }
+            .onChange(of: activeNotes) { _, newNotes in
+                scrollToActiveNotes(proxy, notes: newNotes, animated: false)
             }
         }
     }
 }
 
-/// A piano keyboard spanning a configurable note range. White keys are laid
-/// out edge to edge; black keys are overlaid on the boundaries between them.
+/// Piano keyboard using internal note indices (0 = C0). C2 = 24, C#2 = 25.
 struct PianoKeyboard: View {
-    /// A0 (index 9) through C8 (index 96) — the full 88-key piano range.
-    static let defaultRange = 9...96
-
     let activeNotes: Set<Int>
     let preferFlats: Bool
     let isInteractive: Bool
-    var noteRange: ClosedRange<Int> = defaultRange
+    var noteRange: ClosedRange<Int> = PianoNote.liveKeyboardRange
     let onTap: (Int) -> Void
 
     init(
         activeNotes: Set<Int>,
         preferFlats: Bool,
         isInteractive: Bool,
-        noteRange: ClosedRange<Int> = defaultRange,
+        noteRange: ClosedRange<Int> = PianoNote.liveKeyboardRange,
         onTap: @escaping (Int) -> Void
     ) {
         self.activeNotes = activeNotes
@@ -414,52 +425,114 @@ struct PianoKeyboard: View {
         noteRange.filter { !PianoNote.isBlack($0) }
     }
 
-    /// Black keys with the number of white keys that precede them (for x placement).
-    private var blackPlacements: [(index: Int, whiteCountBefore: Int)] {
-        var result: [(Int, Int)] = []
-        var whiteCount = 0
-        for index in noteRange {
-            if PianoNote.isBlack(index) {
-                result.append((index, whiteCount))
-            } else {
-                whiteCount += 1
+    private struct BlackKeyPlacement: Identifiable {
+        let index: Int
+        let whiteSlot: Int
+        var id: Int { index }
+    }
+
+    private var blackKeyPlacements: [BlackKeyPlacement] {
+        whiteIndices.enumerated().compactMap { slot, whiteIndex in
+            guard [0, 2, 5, 7, 9].contains(PianoNote.pitchClass(of: whiteIndex)) else { return nil }
+            let blackIndex = whiteIndex + 1
+            guard noteRange.contains(blackIndex) else { return nil }
+            return BlackKeyPlacement(index: blackIndex, whiteSlot: slot)
+        }
+    }
+
+    private func isActive(_ index: Int) -> Bool {
+        activeNotes.contains(index)
+    }
+
+    private func resolveNote(
+        at point: CGPoint,
+        whiteWidth: CGFloat,
+        blackWidth: CGFloat,
+        blackHeight: CGFloat,
+        height: CGFloat
+    ) -> Int? {
+        let hitPadding: CGFloat = 6
+
+        if point.y <= blackHeight + hitPadding {
+            for placement in blackKeyPlacements {
+                let centerX = CGFloat(placement.whiteSlot + 1) * whiteWidth
+                let minX = centerX - blackWidth / 2 - hitPadding
+                let maxX = centerX + blackWidth / 2 + hitPadding
+                if point.x >= minX, point.x <= maxX {
+                    return placement.index
+                }
             }
         }
-        return result
+
+        guard point.y >= blackHeight - hitPadding, point.y <= height else { return nil }
+
+        let slot = Int(point.x / whiteWidth)
+        guard slot >= 0, slot < whiteIndices.count else { return nil }
+        return whiteIndices[slot]
     }
 
     var body: some View {
         GeometryReader { geo in
-            let whiteCount = whiteIndices.count
+            let whiteCount = max(1, whiteIndices.count)
             let whiteWidth = geo.size.width / CGFloat(whiteCount)
-            let blackWidth = whiteWidth * 0.62
-            let blackHeight = geo.size.height * 0.62
+            let blackWidth = min(whiteWidth * 0.64, whiteWidth - 2)
+            let blackHeight = geo.size.height * 0.64
+            let labelFontSize = min(13, max(10, whiteWidth * 0.38))
+            let blackLabelFontSize = min(11, max(9, whiteWidth * 0.32))
 
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 0) {
                     ForEach(whiteIndices, id: \.self) { index in
                         WhiteKey(
-                            label: PianoNote.name(of: index, preferFlats: preferFlats, includeOctave: PianoNote.pitchClass(of: index) == 0),
-                            isActive: activeNotes.contains(index),
-                            labelFontSize: min(11, max(7, whiteWidth * 0.42))
+                            label: PianoNote.keyboardLabel(for: index, preferFlats: preferFlats),
+                            isActive: isActive(index),
+                            labelFontSize: labelFontSize
                         )
-                        .frame(width: whiteWidth)
+                        .frame(width: whiteWidth, height: geo.size.height)
                         .id(index)
-                        .onTapGesture { if isInteractive { onTap(index) } }
                     }
                 }
 
-                ForEach(blackPlacements, id: \.index) { placement in
-                    BlackKey(isActive: activeNotes.contains(placement.index))
-                        .frame(width: blackWidth, height: blackHeight)
-                        .position(
-                            x: CGFloat(placement.whiteCountBefore) * whiteWidth,
-                            y: blackHeight / 2
-                        )
-                        .onTapGesture { if isInteractive { onTap(placement.index) } }
+                ForEach(blackKeyPlacements) { placement in
+                    BlackKey(
+                        label: PianoNote.keyboardLabel(for: placement.index, preferFlats: preferFlats),
+                        isActive: isActive(placement.index),
+                        labelFontSize: blackLabelFontSize
+                    )
+                    .frame(width: blackWidth, height: blackHeight)
+                    .offset(
+                        x: CGFloat(placement.whiteSlot + 1) * whiteWidth - blackWidth / 2,
+                        y: 0
+                    )
+                    .id(placement.index)
+                    .zIndex(1)
+                    .allowsHitTesting(false)
                 }
             }
-            .animation(.easeOut(duration: 0.12), value: activeNotes)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onEnded { value in
+                        guard isInteractive else { return }
+                        let travel = hypot(value.translation.width, value.translation.height)
+                        guard travel < 12 else { return }
+                        if let note = resolveNote(
+                            at: value.location,
+                            whiteWidth: whiteWidth,
+                            blackWidth: blackWidth,
+                            blackHeight: blackHeight,
+                            height: geo.size.height
+                        ) {
+                            onTap(note)
+                        }
+                    }
+            )
+            .transaction { transaction in
+                if isInteractive {
+                    transaction.animation = .easeOut(duration: 0.04)
+                }
+            }
         }
     }
 }
@@ -487,11 +560,22 @@ private struct WhiteKey: View {
 }
 
 private struct BlackKey: View {
+    let label: String
     let isActive: Bool
+    var labelFontSize: CGFloat = 8
 
     var body: some View {
         RoundedRectangle(cornerRadius: 4, style: .continuous)
             .fill(isActive ? AppTheme.accentSecondary : Color(white: 0.08))
+            .overlay(alignment: .bottom) {
+                Text(label)
+                    .font(.system(size: labelFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isActive ? AppTheme.background : Color.white.opacity(0.72))
+                    .minimumScaleFactor(0.45)
+                    .lineLimit(1)
+                    .padding(.horizontal, 1)
+                    .padding(.bottom, max(3, labelFontSize * 0.45))
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .stroke(Color.black.opacity(0.6), lineWidth: 1)
