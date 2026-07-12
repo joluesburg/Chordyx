@@ -6,6 +6,11 @@
 import SwiftUI
 import MultipeerConnectivity
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 struct SessionView: View {
     @Bindable var viewModel: SessionViewModel
@@ -19,7 +24,6 @@ struct SessionView: View {
     @State private var saveName = ""
     @State private var showSavedToast = false
     @State private var pendingHostProgression: SavedProgression?
-    @State private var tapTimes: [Date] = []
     @State private var beatFlashEnabled = true
     @State private var flashOpacity: Double = 0
     @State private var flashColor: Color = AppTheme.accent
@@ -28,6 +32,8 @@ struct SessionView: View {
     @AppStorage("metronomeVolume") private var metronomeVolume: Double = 0.8
     @AppStorage("metronomePanelVisible") private var metronomePanelVisible = true
     @AppStorage("guestShowLiveChordsOnRing") private var showLiveChordsOnRing = false
+    @AppStorage(GuestDisplaySettings.liveNowOnlyKey) private var guestLiveNowOnly = false
+    @AppStorage(SessionViewModel.showInternetJoinCodeKey) private var showInternetJoinCode = false
     @AppStorage("guestMetronomeAudioEnabled") private var guestMetronomeAudioEnabled = true
     @State private var showMetadataEditor = false
     @State private var showMIDISettings = false
@@ -38,19 +44,61 @@ struct SessionView: View {
     @State private var showBackingTrackImporter = false
     @State private var backingTrackImportError: String?
     @State private var showPreServiceChecklist = false
+    @State private var showExtendedFeaturesHub = false
+    @State private var showAdvancedFeaturesHub = false
+    @State private var showGuestRoles = false
+    @State private var showRehearsalList = false
+    @State private var showJoinQR = false
+    @State private var isKeyMenuPresented = false
     @AppStorage(GuestDisplaySettings.transposeKey) private var guestTranspose = 0
     @AppStorage(GuestDisplaySettings.capoKey) private var guestCapo = 0
+    @AppStorage(GuestDisplaySettings.bandCuePadVisibleKey) private var bandCuePadVisible = false
+    @AppStorage(SessionDockSettings.layoutModeKey) private var liveDockLayoutModeRaw = LiveDockLayoutMode.automatic.rawValue
+    @AppStorage(SessionDockSettings.heightPresetKey) private var liveDockHeightPresetRaw = LiveDockHeightPreset.standard.rawValue
+    @AppStorage(SessionDockSettings.selectedTabKey) private var liveDockSelectedTabRaw = LiveHostDockTab.quick.rawValue
+    @AppStorage(SessionDockSettings.sideRailVisibleKey) private var liveSideRailVisible = true
 
     private var isHost: Bool { viewModel.role == .host || viewModel.isPracticeMode }
     private var isGuest: Bool { viewModel.role == .guest }
     private var isPractice: Bool { viewModel.isPracticeMode }
 
     private var isLivePerformance: Bool {
-        viewModel.payload.performanceMode == .live && !isPractice
+        viewModel.payload.performanceMode.usesCompactStageUI && !isPractice
     }
 
     private var isLiveCompactHost: Bool {
         isHost && isLivePerformance && !liveToolsExpanded
+    }
+
+    private var showsLiveHostTransportDeck: Bool {
+        needsLiveChordTransport
+    }
+
+    /// Prev/next chord transport — only when a saved progression has multiple chords to step through.
+    private var needsLiveChordTransport: Bool {
+        guard isLivePerformance, !liveToolsExpanded else { return false }
+        guard isHost || viewModel.isCoHost else { return false }
+        guard viewModel.canDriveSession || viewModel.isCoHost else { return false }
+        guard !viewModel.payload.isLiveChordsOnly else { return false }
+        guard !viewModel.isLiveProgressionSession else { return viewModel.sortedChords.count > 1 }
+        return viewModel.sortedChords.count > 1
+    }
+
+    private var usesLiveChordHeroLayout: Bool {
+        isLivePerformance && !liveToolsExpanded
+    }
+
+    /// Live chord sync is the product's core — never bury it behind ring layout.
+    private var prefersLiveChordHeroDisplay: Bool {
+        if viewModel.payload.isLiveChordsOnly { return true }
+        if guestShowsLiveNowOnly { return true }
+        if usesLiveChordHeroLayout { return true }
+        if isLivePerformance && (viewModel.hasFreestyleActivity || ringShowsLiveChords) { return true }
+        return false
+    }
+
+    private var usesChordRingLayout: Bool {
+        effectiveDisplayMode == .ring && !prefersLiveChordHeroDisplay
     }
 
     private var isCountInActive: Bool {
@@ -59,11 +107,16 @@ struct SessionView: View {
 
     private var shouldOfferPreServiceChecklist: Bool {
         isHost && !isPractice && isLivePerformance
+            && GuestDisplaySettings.preServiceChecklistAutoShowEnabled
             && GuestDisplaySettings.preServiceChecklistDismissedToken != viewModel.payload.sessionToken.uuidString
     }
 
     private var effectiveDisplayMode: SessionDisplayMode {
         viewModel.effectiveDisplayMode(isGuest: isGuest)
+    }
+
+    private var guestShowsLiveNowOnly: Bool {
+        isGuest && isLivePerformance && guestLiveNowOnly
     }
 
     private var shouldShowScaleHint: Bool {
@@ -105,7 +158,44 @@ struct SessionView: View {
     }
 
     private var usesWideLiveCompactDeck: Bool {
-        usesWideSessionLayout && isLiveCompactHost
+        usesWideSessionLayout && isLiveCompactHost && !usesLiveHostControlDock
+    }
+
+    private var usesLiveHostControlDock: Bool {
+        usesWideSessionLayout && isLiveCompactHost && viewModel.canDriveSession
+    }
+
+    /// iPhone portrait live session — split chord hero and bottom controls ~50/50.
+    private var usesPhonePortraitLiveSplit: Bool {
+        #if os(iOS)
+        PlatformDevice.isPhone && verticalSizeClass == .regular && isLivePerformance
+        #else
+        false
+        #endif
+    }
+
+    private func phonePortraitLiveUsableHeight(viewportHeight: CGFloat) -> CGFloat {
+        let header = maxHeaderHeight(for: viewportHeight)
+        return max(0, viewportHeight - header - 12)
+    }
+
+    private var liveDockSelectedTab: Binding<LiveHostDockTab> {
+        Binding(
+            get: { LiveHostDockTab(rawValue: liveDockSelectedTabRaw) ?? .quick },
+            set: { liveDockSelectedTabRaw = $0.rawValue }
+        )
+    }
+
+    private var liveDockLayoutMode: Binding<LiveDockLayoutMode> {
+        Binding(
+            get: { LiveDockLayoutMode(rawValue: liveDockLayoutModeRaw) ?? .automatic },
+            set: { liveDockLayoutModeRaw = $0.rawValue }
+        )
+    }
+
+    private func resolvedLiveDockLayout(viewportWidth: CGFloat) -> LiveDockLayoutMode {
+        let stored = LiveDockLayoutMode(rawValue: liveDockLayoutModeRaw) ?? .automatic
+        return SessionDockSettings.resolvedLayoutMode(viewportWidth: viewportWidth, stored: stored)
     }
 
     private var sessionPanelMaxWidth: CGFloat {
@@ -116,8 +206,29 @@ struct SessionView: View {
         PlatformLayout.sessionHorizontalPadding(horizontalSizeClass: horizontalSizeClass)
     }
 
-    private func maxBottomPanelHeight(for viewportHeight: CGFloat) -> CGFloat {
-        let isRingHero = effectiveDisplayMode == .ring
+    private func maxBottomPanelHeight(for viewportHeight: CGFloat, viewportWidth: CGFloat = 1_000) -> CGFloat {
+        if usesPhonePortraitLiveSplit {
+            let usable = phonePortraitLiveUsableHeight(viewportHeight: viewportHeight)
+            let fraction: CGFloat = bandCuePadVisible ? 0.56 : 0.50
+            return usable * fraction
+        }
+        if usesLiveHostControlDock {
+            let layout = resolvedLiveDockLayout(viewportWidth: viewportWidth)
+            if layout == .sideRail {
+                return needsLiveChordTransport ? 118 : 78
+            }
+            let preset = LiveDockHeightPreset(rawValue: liveDockHeightPresetRaw) ?? .standard
+            return SessionDockSettings.bottomPanelHeight(
+                viewportHeight: viewportHeight,
+                preset: preset,
+                bandCuePadVisible: bandCuePadVisible
+            )
+        }
+        if prefersLiveChordHeroDisplay && isLivePerformance {
+            let fraction = bandCuePadVisible ? 0.26 : 0.16
+            return min(bandCuePadVisible ? 220 : 150, viewportHeight * fraction)
+        }
+        let isRingHero = usesChordRingLayout || guestShowsLiveNowOnly
         #if os(macOS)
         if isGuest && isRingHero {
             return min(240, viewportHeight * 0.30)
@@ -126,7 +237,9 @@ struct SessionView: View {
         let fraction: CGFloat
         if usesWideSessionLayout {
             if isHost && isLivePerformance && !liveToolsExpanded {
-                fraction = verticalSizeClass == .compact ? 0.34 : 0.38
+                fraction = bandCuePadVisible
+                    ? (verticalSizeClass == .compact ? 0.34 : 0.38)
+                    : (verticalSizeClass == .compact ? 0.24 : 0.26)
             } else if isRingHero {
                 fraction = isGuest ? 0.30 : 0.28
             } else {
@@ -140,7 +253,9 @@ struct SessionView: View {
             }
         } else if isHost {
             if isLivePerformance && !liveToolsExpanded {
-                fraction = verticalSizeClass == .compact ? 0.26 : 0.24
+                fraction = bandCuePadVisible
+                    ? (verticalSizeClass == .compact ? 0.44 : 0.46)
+                    : (verticalSizeClass == .compact ? 0.28 : 0.30)
             } else if isRingHero {
                 fraction = verticalSizeClass == .compact ? 0.34 : 0.30
             } else {
@@ -153,8 +268,11 @@ struct SessionView: View {
     }
 
     private func maxHeaderHeight(for viewportHeight: CGFloat) -> CGFloat {
-        if effectiveDisplayMode == .ring {
+        if usesChordRingLayout {
             return horizontalSizeClass == .regular ? 92 : 80
+        }
+        if prefersLiveChordHeroDisplay {
+            return horizontalSizeClass == .regular ? 72 : 64
         }
         return horizontalSizeClass == .regular ? 220 : min(200, viewportHeight * 0.24)
     }
@@ -164,6 +282,10 @@ struct SessionView: View {
         bottomMaxHeight: CGFloat,
         headerMaxHeight: CGFloat
     ) -> CGFloat {
+        if usesPhonePortraitLiveSplit {
+            let usable = phonePortraitLiveUsableHeight(viewportHeight: viewportHeight)
+            return max(200, usable * 0.50)
+        }
         let verticalPadding: CGFloat = verticalSizeClass == .compact ? 12 : 20
         let reserved = bottomMaxHeight + headerMaxHeight + verticalPadding
         let available = viewportHeight - reserved
@@ -200,7 +322,7 @@ struct SessionView: View {
             if horizontalSizeClass == .regular { return isGuest ? 300 : 280 }
             return isGuest ? 230 : 210
         }()
-        let centerDiameter = min(centerCap, clearance * 2)
+        let centerDiameter = max(minCenterDiameter, min(centerCap, clearance * 2))
         return (bubbleSize, radius, centerDiameter)
     }
     private var peerCount: Int {
@@ -220,7 +342,8 @@ struct SessionView: View {
     }
 
     private var ringShowsLiveChords: Bool {
-        isHost ? viewModel.payload.ringShowsLiveChords : showLiveChordsOnRing
+        if viewModel.payload.isLiveChordsOnly { return true }
+        return isHost ? viewModel.payload.ringShowsLiveChords : showLiveChordsOnRing
     }
 
     private var ringSourceBinding: Binding<Bool> {
@@ -235,11 +358,21 @@ struct SessionView: View {
     }
 
     private var ringChords: [ChordEntry] {
-        if ringShowsLiveChords {
-            let live = viewModel.freestyleChordEntries
-            return live.isEmpty ? resolvedRingSectionChords : live
-        }
+        if let live = liveRingChords { return live }
         return resolvedRingSectionChords
+    }
+
+    /// Live MIDI ring: unique chords for the current song only (not the full progression list).
+    /// Once a repeating progression is inferred, fall back to the ordered `sortedChords` ring.
+    private var liveRingChords: [ChordEntry]? {
+        if viewModel.hasInferredLiveProgression, !viewModel.sortedChords.isEmpty {
+            return nil
+        }
+        if ringShowsLiveChords || viewModel.isLiveProgressionSession || viewModel.payload.isLiveChordsOnly {
+            let live = viewModel.freestyleChordEntries
+            if !live.isEmpty { return live }
+        }
+        return nil
     }
 
     private var resolvedRingSectionChords: [ChordEntry] {
@@ -249,10 +382,13 @@ struct SessionView: View {
     }
 
     private var centerChord: ChordEntry? {
+        if viewModel.hasInferredLiveProgression {
+            return viewModel.livePianoChordEntry() ?? viewModel.activeChord
+        }
         if centerShowsLivePiano {
             return viewModel.livePianoChordEntry() ?? viewModel.activeChord
         }
-        if ringShowsLiveChords {
+        if liveRingChords != nil || ringShowsLiveChords || viewModel.payload.isLiveChordsOnly {
             return viewModel.liveFreestyleChord ?? viewModel.activeChord
         }
         return viewModel.activeChord
@@ -262,50 +398,121 @@ struct SessionView: View {
         viewModel.displayNotation(isGuest: isGuest)
     }
 
+    private var keyControlTitle: String {
+        let keyName = viewModel.payload.key.displayName
+        if viewModel.payload.autoDetectKey {
+            if viewModel.payload.isKeyAutoDetected {
+                return String(format: String(localized: "Key %@ · AI"), keyName)
+            }
+            return String(format: String(localized: "Key %@ · AI listening"), keyName)
+        }
+        return String(format: String(localized: "Key %@"), keyName)
+    }
+
     var body: some View {
-        sessionWithAlerts
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppTheme.backgroundGradient.ignoresSafeArea())
+        Group {
+            if viewModel.payload.isStageDisplayOnly {
+                stageDisplayOnlyLayout
+            } else {
+                sessionWithAlerts
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.backgroundGradient.ignoresSafeArea())
+        .platformDesktopControls()
+    }
+
+    private var stageDisplayOnlyLayout: some View {
+        ZStack(alignment: .topTrailing) {
+            StageDisplayShellView(viewModel: viewModel, isGuest: isGuest)
+            Button {
+                viewModel.toggleStageDisplayOnly()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .symbolRenderingMode(.hierarchical)
+                    .padding()
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var sessionLayout: some View {
         GeometryReader { geometry in
-            let bottomMaxHeight = maxBottomPanelHeight(for: geometry.size.height)
+            let bottomMaxHeight = maxBottomPanelHeight(
+                for: geometry.size.height,
+                viewportWidth: geometry.size.width
+            )
             let headerMaxHeight = maxHeaderHeight(for: geometry.size.height)
             let stageHeight = effectiveStageHeight(
                 viewportHeight: geometry.size.height,
                 bottomMaxHeight: bottomMaxHeight,
                 headerMaxHeight: headerMaxHeight
             )
+            let dockLayout = resolvedLiveDockLayout(viewportWidth: geometry.size.width)
+            let showSideRail = usesLiveHostControlDock
+                && dockLayout == .sideRail
+                && liveSideRailVisible
 
-            sessionContent(stageHeight: stageHeight)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    if effectiveDisplayMode == .ring {
-                        ringModeHeader
-                    } else if viewModel.payload.performanceMode == .rehearsal {
-                        sessionHeader(maxHeight: headerMaxHeight)
-                    } else {
-                        compactSessionHeader(maxHeight: headerMaxHeight)
+            if usesLiveHostControlDock, dockLayout == .sideRail {
+                HStack(spacing: 0) {
+                    sessionMainColumn(
+                        stageHeight: stageHeight,
+                        headerMaxHeight: headerMaxHeight,
+                        bottomMaxHeight: bottomMaxHeight,
+                        viewportWidth: geometry.size.width
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if showSideRail {
+                        Divider()
+                        liveHostControlRail(style: .sideRail)
+                            .frame(width: SessionDockSettings.sideRailDefaultWidth)
                     }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    bottomPanel(maxHeight: bottomMaxHeight)
-                }
+            } else {
+                sessionMainColumn(
+                    stageHeight: stageHeight,
+                    headerMaxHeight: headerMaxHeight,
+                    bottomMaxHeight: bottomMaxHeight,
+                    viewportWidth: geometry.size.width
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder
-    private var sessionWithOverlays: some View {
-        sessionLayout
-            .onAppear {
-                if isGuest {
-                    viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
+    private func sessionMainColumn(
+        stageHeight: CGFloat,
+        headerMaxHeight: CGFloat,
+        bottomMaxHeight: CGFloat,
+        viewportWidth: CGFloat
+    ) -> some View {
+        sessionContent(stageHeight: stageHeight)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if usesChordRingLayout {
+                    ringModeHeader
+                } else if viewModel.payload.performanceMode == .rehearsal {
+                    sessionHeader(maxHeight: headerMaxHeight)
                 } else {
-                    viewModel.refreshMetronomeAudioPolicy()
+                    compactSessionHeader(maxHeight: headerMaxHeight)
                 }
-                presentPreServiceChecklistIfNeeded()
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                bottomPanel(maxHeight: bottomMaxHeight, viewportWidth: viewportWidth)
+                    .animation(.spring(response: 0.32, dampingFraction: 0.86), value: liveDockHeightPresetRaw)
+                    .animation(.spring(response: 0.32, dampingFraction: 0.86), value: verticalSizeClass)
+            }
+    }
+
+    private var sessionWithOverlays: some View {
+        sessionLayoutWithLifecycle
+            .overlay { sessionOverlayStack }
+    }
+
+    private var sessionLayoutWithLifecycle: some View {
+        sessionLayout
+            .onAppear(perform: configureSessionOnAppear)
             .onChange(of: viewModel.isInSession) { _, inSession in
                 if inSession { presentPreServiceChecklistIfNeeded() }
             }
@@ -316,46 +523,79 @@ struct SessionView: View {
                 viewModel.refreshMetronomeAudioPolicy()
             }
             .onChange(of: scenePhase) { _, phase in
-                switch phase {
-                case .active:
-                    viewModel.handleAppDidBecomeActive()
-                case .background:
-                    viewModel.handleAppDidEnterBackground()
-                case .inactive:
-                    break
-                @unknown default:
-                    break
-                }
+                handleScenePhaseChange(phase)
             }
-            .overlay { cueOverlayContent }
-            .overlay { countInOverlayContent }
-            .overlay { chordChangeWarningOverlayContent }
-            .overlay { transitionOverlayContent }
-            .overlay { beatFlashOverlayContent }
-            .overlay { songEndingOverlayContent }
-            .overlay { reconnectOverlayContent }
             .onChange(of: viewModel.metronome.currentBeat) { _, newBeat in
-                guard newBeat >= 0 else { return }
-
-                if isCountInActive {
-                    pulseBeatFlash(color: newBeat == 0 ? AppTheme.accent : AppTheme.accentSecondary, intensity: newBeat == 0 ? 1.0 : 0.7)
-                    return
-                }
-
-                if viewModel.shouldShowChordChangeWarning {
-                    pulseBeatFlash(color: AppTheme.accentSecondary, intensity: newBeat == 0 ? 1.0 : 0.55)
-                    if newBeat == 0 {
-                        viewModel.triggerChordChangeWarningHaptic()
-                    }
-                    return
-                }
-
-                guard isGuest, beatFlashEnabled, viewModel.payload.isMetronomePlaying else { return }
-                pulseBeatFlash(
-                    color: newBeat == 0 ? AppTheme.accent : AppTheme.accentSecondary,
-                    intensity: newBeat == 0 ? 1.0 : 0.6
-                )
+                handleMetronomeBeatChange(newBeat)
             }
+    }
+
+    @ViewBuilder
+    private var sessionOverlayStack: some View {
+        cueOverlayContent
+        countInOverlayContent
+        sectionCountdownOverlayContent
+        extendedSessionOverlayContent
+        chordChangeWarningOverlayContent
+        transitionOverlayContent
+        beatFlashOverlayContent
+        songEndingOverlayContent
+        reconnectOverlayContent
+    }
+
+    private func configureSessionOnAppear() {
+        if isGuest {
+            viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
+        } else {
+            viewModel.refreshMetronomeAudioPolicy()
+        }
+        presentPreServiceChecklistIfNeeded()
+    }
+
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            viewModel.handleAppDidBecomeActive()
+        case .background:
+            viewModel.handleAppDidEnterBackground()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleMetronomeBeatChange(_ newBeat: Int) {
+        guard viewModel.isInSession else { return }
+        guard newBeat >= 0 else { return }
+        if newBeat == 0 {
+            viewModel.updateTempoDrift()
+        }
+
+        if isCountInActive {
+            pulseBeatFlash(
+                color: newBeat == 0 ? AppTheme.accent : AppTheme.accentSecondary,
+                intensity: newBeat == 0 ? 1.0 : 0.7
+            )
+            return
+        }
+
+        if viewModel.shouldShowChordChangeWarning {
+            pulseBeatFlash(
+                color: AppTheme.accentSecondary,
+                intensity: newBeat == 0 ? 1.0 : 0.55
+            )
+            if newBeat == 0 {
+                viewModel.triggerChordChangeWarningHaptic()
+            }
+            return
+        }
+
+        guard isGuest, beatFlashEnabled, viewModel.displayedMetronomePlaying else { return }
+        pulseBeatFlash(
+            color: newBeat == 0 ? AppTheme.accent : AppTheme.accentSecondary,
+            intensity: newBeat == 0 ? 1.0 : 0.6
+        )
     }
 
     private func pulseBeatFlash(color: Color, intensity: Double) {
@@ -381,28 +621,122 @@ struct SessionView: View {
     private var chordChangeWarningOverlayContent: some View {
         if viewModel.shouldShowChordChangeWarning,
            let remaining = viewModel.chordChangeBeatsRemaining {
-            VStack {
-                ChordChangeWarningBanner(beatsRemaining: remaining)
-                    .padding(.top, 72)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-            .transition(.move(edge: .top).combined(with: .opacity))
+            ChordChangeWarningBanner(beatsRemaining: remaining)
+                .padding(.top, 72)
+                .padding(.horizontal, sessionHorizontalPadding)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .allowsHitTesting(false)
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
+    }
+
+    @ViewBuilder
+    private var sectionCountdownOverlayContent: some View {
+        if viewModel.payload.sectionCountdownBeats > 0,
+           let label = viewModel.payload.sectionCountdownLabel {
+            SectionCountdownOverlay(
+                sectionName: label,
+                beatsRemaining: viewModel.payload.sectionCountdownBeats
+            )
+            .padding(.top, 120)
+            .padding(.horizontal, sessionHorizontalPadding)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var extendedSessionOverlayContent: some View {
+        VStack(spacing: 8) {
+            if viewModel.payload.isGhostBandReplayActive {
+                GhostBandReplayBanner {
+                    viewModel.stopGhostBandReplay()
+                }
+            }
+
+            if let handoff = viewModel.payload.handoffCountdown, handoff > 0 {
+                HandoffCountdownBanner(
+                    fromPeer: viewModel.payload.handoffFromPeer,
+                    seconds: handoff
+                )
+            }
+
+            if !isGuest,
+               abs(viewModel.payload.tempoDriftBPM) > 2,
+               viewModel.payload.isMetronomePlaying,
+               !viewModel.payload.hostLiveGrooveActive {
+                TempoDriftBanner(driftBPM: viewModel.payload.tempoDriftBPM)
+            }
+
+            if let note = viewModel.currentRoleLiveNote {
+                RoleLiveNoteBanner(note: note)
+            }
+
+            if let suggestion = viewModel.capoSuggestion, isHost, showsSecondaryBandOverlays {
+                CapoSuggestionBanner(suggestion: suggestion) {
+                    viewModel.transpose(to: suggestion.vocalKey)
+                }
+            }
+
+            if let suggestion = viewModel.vocalRangeSuggestion, isHost, showsSecondaryBandOverlays {
+                VocalRangeBanner(suggestion: suggestion) {
+                    viewModel.transpose(to: suggestion.suggestedKey)
+                }
+            }
+
+            if let hint = viewModel.currentVoicingHint, showsSecondaryBandOverlays {
+                VoicingHintBanner(hint: hint)
+            }
+
+            if !viewModel.payload.peerPresence.isEmpty, isHost, showsSecondaryBandOverlays {
+                ChordPresenceStrip(
+                    presence: viewModel.payload.peerPresence,
+                    activeChordID: viewModel.payload.activeChordID
+                )
+            }
+
+            if isHost, !viewModel.sessionManager.connectedPeers.isEmpty, showsSecondaryBandOverlays {
+                SilentNudgePad(viewModel: viewModel)
+            }
+
+            if viewModel.isInSession, showsSessionQuickMessages {
+                QuickMessageBar(viewModel: viewModel, canSend: !isGuest || viewModel.isCoHost)
+            }
+        }
+        .padding(.horizontal, sessionHorizontalPadding)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var showsSecondaryBandOverlays: Bool {
+        !isLiveCompactHost
+    }
+
+    private var showsSessionQuickMessages: Bool {
+        if isLiveCompactHost { return bandCuePadVisible }
+        return isHost || showsSecondaryBandOverlays
+    }
+
+    private var notationOverlayAlignment: Alignment {
+        #if os(iOS)
+        if isLivePerformance || usesWideSessionLayout { return .topTrailing }
+        #else
+        if usesWideSessionLayout { return .topTrailing }
+        #endif
+        return .bottomTrailing
     }
 
     @ViewBuilder
     private var cueOverlayContent: some View {
         if let cue = viewModel.payload.activeCue {
-            VStack {
-                LiveCueBanner(
-                    cue: cue,
-                    isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
-                    isVampActive: viewModel.payload.isVampActive
-                )
-                    .padding(.top, 80)
-                Spacer()
-            }
+            LiveCueBanner(
+                cue: cue,
+                isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
+                isVampActive: viewModel.payload.isVampActive
+            )
+            .padding(.top, 80)
+            .padding(.horizontal, sessionHorizontalPadding)
+            .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
         }
     }
@@ -411,6 +745,7 @@ struct SessionView: View {
     private var transitionOverlayContent: some View {
         if let title = viewModel.payload.transitionTitle {
             SetlistTransitionOverlay(title: title, countdown: viewModel.payload.transitionCountdown)
+                .allowsHitTesting(true)
         }
     }
 
@@ -424,42 +759,41 @@ struct SessionView: View {
     }
 
     @ViewBuilder
-    private var reconnectOverlayContent: some View {
-        if viewModel.showReconnectBanner, isGuest {
-            VStack {
-                ReconnectBanner(
-                    sessionName: viewModel.payload.sessionName,
-                    onReconnect: { viewModel.tryAutoReconnectIfPossible() },
-                    onLeave: { showLeaveConfirmation = true }
-                )
-                .padding(.horizontal, sessionHorizontalPadding)
-                .padding(.top, 8)
-                Spacer()
-            }
-        }
-    }
-
-    @ViewBuilder
     private var beatFlashOverlayContent: some View {
         let shouldFlash = isCountInActive
             || viewModel.shouldShowChordChangeWarning
-            || (isGuest && beatFlashEnabled && viewModel.payload.isMetronomePlaying)
+            || (isGuest && beatFlashEnabled && viewModel.displayedMetronomePlaying)
         if shouldFlash {
             RoundedRectangle(cornerRadius: 0)
                 .stroke(flashColor, lineWidth: isCountInActive ? 14 : 10)
                 .padding(6)
                 .opacity(flashOpacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var reconnectOverlayContent: some View {
+        if viewModel.showReconnectBanner, isGuest {
+            ReconnectBanner(
+                sessionName: viewModel.payload.sessionName,
+                onReconnect: { viewModel.tryAutoReconnectIfPossible() },
+                onLeave: { showLeaveConfirmation = true }
+            )
+            .padding(.horizontal, sessionHorizontalPadding)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
     @ViewBuilder
     private var sessionWithSheets: some View {
         sessionWithOverlays
-            .sheet(isPresented: $showMIDISettings) {
+            .platformSheet(isPresented: $showMIDISettings) {
                 MIDISettingsView(viewModel: viewModel)
             }
-            .sheet(isPresented: $showGuestSettings, onDismiss: {
+            .platformSheet(isPresented: $showGuestSettings, onDismiss: {
                 if isGuest {
                     viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
                 }
@@ -467,22 +801,39 @@ struct SessionView: View {
             }) {
                 GuestMusicianSettingsView()
             }
-            .sheet(isPresented: $showLockScreenSettings) {
+            .platformSheet(isPresented: $showLockScreenSettings) {
                 LockScreenActivitySettingsView()
             }
-            .sheet(isPresented: $showPDFChart) {
+            .platformSheet(isPresented: $showPDFChart) {
                 pdfChartSheet
             }
-            .sheet(isPresented: $showMetadataEditor) {
+            .platformSheet(isPresented: $showMetadataEditor) {
                 metadataEditorSheet
             }
-            .sheet(isPresented: $showProgressionEditor) {
+            .platformSheet(isPresented: $showProgressionEditor, large: true) {
                 ProgressionEditorView(viewModel: viewModel)
             }
-            .sheet(isPresented: $showPreServiceChecklist) {
-                PreServiceChecklistView(viewModel: viewModel) {
-                    GuestDisplaySettings.preServiceChecklistDismissedToken = viewModel.payload.sessionToken.uuidString
+            .platformSheet(isPresented: $showPreServiceChecklist, onDismiss: markPreServiceChecklistDismissedForSession, large: true) {
+                PreServiceChecklistView(viewModel: viewModel, store: store) {
+                    markPreServiceChecklistDismissedForSession()
                     showPreServiceChecklist = false
+                }
+            }
+            .platformSheet(isPresented: $showExtendedFeaturesHub, large: true) {
+                ExtendedFeaturesHubView(viewModel: viewModel, store: store)
+            }
+            .platformSheet(isPresented: $showAdvancedFeaturesHub, large: true) {
+                AdvancedFeaturesHubView(viewModel: viewModel, store: store)
+            }
+            .platformSheet(isPresented: $showGuestRoles) {
+                GuestRoleAssignmentView(viewModel: viewModel)
+            }
+            .platformSheet(isPresented: $showRehearsalList) {
+                RehearsalRecordingsView(viewModel: viewModel)
+            }
+            .platformSheet(isPresented: $showJoinQR) {
+                if let code = viewModel.payload.remoteJoinCode {
+                    SessionJoinQRSheet(joinCode: code)
                 }
             }
             .platformPianoSheet(isPresented: $showPianoOverlay, onDismiss: dismissPianoOverlay) {
@@ -516,6 +867,43 @@ struct SessionView: View {
             }
             .onKeyPress(.space) {
                 if viewModel.canDriveSession { viewModel.toggleMetronome() }
+                return .handled
+            }
+            .onKeyPress("1", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                liveDockSelectedTabRaw = LiveHostDockTab.quick.rawValue
+                liveSideRailVisible = true
+                return .handled
+            }
+            .onKeyPress("2", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                liveDockSelectedTabRaw = LiveHostDockTab.metronome.rawValue
+                liveSideRailVisible = true
+                return .handled
+            }
+            .onKeyPress("3", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                liveDockSelectedTabRaw = LiveHostDockTab.audio.rawValue
+                liveSideRailVisible = true
+                return .handled
+            }
+            .onKeyPress("4", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                liveDockSelectedTabRaw = LiveHostDockTab.cues.rawValue
+                liveSideRailVisible = true
+                return .handled
+            }
+            .onKeyPress("5", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                liveDockSelectedTabRaw = LiveHostDockTab.session.rawValue
+                liveSideRailVisible = true
+                return .handled
+            }
+            .onKeyPress("\\", phases: .down) { _ in
+                guard usesLiveHostControlDock else { return .ignored }
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    liveSideRailVisible.toggle()
+                }
                 return .handled
             }
 #endif
@@ -681,6 +1069,31 @@ struct SessionView: View {
                         .padding(.top, 4)
                 }
 
+                if let mismatch = viewModel.payload.pianoChartMismatch, isHost {
+                    PianoChartMismatchBanner(message: mismatch)
+                        .padding(.horizontal, sessionHorizontalPadding)
+                        .padding(.top, 4)
+                }
+
+                if !viewModel.payload.sections.isEmpty {
+                    LiveSectionRoadmap(
+                        sections: viewModel.payload.sections,
+                        chords: viewModel.payload.chords,
+                        activeSectionID: viewModel.payload.activeSectionID,
+                        isLocked: viewModel.payload.isSectionMapLocked && isLivePerformance,
+                        onJump: { viewModel.jumpToSection($0) }
+                    )
+                    .padding(.horizontal, sessionHorizontalPadding)
+                    .padding(.top, 4)
+                }
+
+                if viewModel.isRecordingRehearsal, isHost {
+                    Label(String(localized: "Recording rehearsal timeline"), systemImage: "record.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .padding(.top, 4)
+                }
+
                 if !GuestDisplaySettings.externalDisplayGuideDismissed,
                    (isHost || isPractice),
                    !isLivePerformance {
@@ -691,10 +1104,20 @@ struct SessionView: View {
                     .padding(.top, 4)
                 }
 
-                if effectiveDisplayMode == .ring {
+                if usesChordRingLayout {
                     chordRingContent()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
+                } else if prefersLiveChordHeroDisplay {
+                    StageDisplayView(
+                        viewModel: viewModel,
+                        isGuest: isGuest,
+                        guestTranspose: guestTranspose,
+                        guestCapo: guestCapo,
+                        nowOnlyFocus: true
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
                 } else {
                     Spacer(minLength: verticalSizeClass == .compact ? 4 : 8)
 
@@ -704,7 +1127,8 @@ struct SessionView: View {
                             viewModel: viewModel,
                             isGuest: isGuest,
                             guestTranspose: isGuest ? guestTranspose : 0,
-                            guestCapo: isGuest ? guestCapo : 0
+                            guestCapo: isGuest ? guestCapo : 0,
+                            nowOnlyFocus: usesLiveChordHeroLayout
                         )
                         .frame(maxHeight: stageHeight + 80)
                     case .chart:
@@ -715,6 +1139,19 @@ struct SessionView: View {
                             guestCapo: isGuest ? guestCapo : 0
                         )
                         .frame(maxHeight: stageHeight + 120)
+                    case .director:
+                        DirectorModePanel(viewModel: viewModel, store: store)
+                            .frame(maxHeight: stageHeight + 120)
+                    case .audience:
+                        AudienceLyricsDisplay(
+                            viewModel: viewModel,
+                            guestTranspose: guestTranspose,
+                            guestCapo: guestCapo
+                        )
+                        .frame(maxHeight: stageHeight + 120)
+                    case .congregation:
+                        CongregationDisplayView(viewModel: viewModel)
+                            .frame(maxHeight: stageHeight + 120)
                     case .ring:
                         EmptyView()
                     }
@@ -731,10 +1168,11 @@ struct SessionView: View {
                 importSessionGuideBanner(guide)
             }
         }
-        .overlay(alignment: usesWideSessionLayout ? .topTrailing : .bottomTrailing) {
+        .overlay(alignment: notationOverlayAlignment) {
             NotationCycleButton(viewModel: viewModel, isGuest: isGuest)
                 .padding(.trailing, sessionHorizontalPadding)
-                .padding(usesWideSessionLayout ? .top : .bottom, 8)
+                .padding(notationOverlayAlignment == .topTrailing ? .top : .bottom, 8)
+                .zIndex(20)
         }
     }
 
@@ -781,10 +1219,12 @@ struct SessionView: View {
 
     @ViewBuilder
     private var ringStatusBadge: some View {
-        if viewModel.isLiveProgressionSession && !viewModel.sortedChords.isEmpty && !ringShowsLiveChords {
-            liveProgressionBadge
-        } else if ringShowsLiveChords {
+        if viewModel.hasInferredLiveProgression, !viewModel.sortedChords.isEmpty {
+            inferredProgressionBadge
+        } else if liveRingChords != nil || ringShowsLiveChords {
             liveChordBadge
+        } else if viewModel.isLiveProgressionSession && !viewModel.sortedChords.isEmpty {
+            liveProgressionBadge
         } else if centerShowsLivePiano {
             liveChordBadge
         } else if !viewModel.sortedChords.isEmpty {
@@ -796,7 +1236,7 @@ struct SessionView: View {
         GeometryReader { geo in
             let layout = ringLayout(in: geo.size, chordCount: ringChords.count)
 
-            if ringChords.isEmpty {
+            if ringChords.isEmpty && centerChord == nil {
                 VStack(spacing: 12) {
                     Image(systemName: "circle.grid.cross")
                         .font(.system(size: 44))
@@ -804,9 +1244,7 @@ struct SessionView: View {
                     Text("Waiting for chords")
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(AppTheme.textPrimary)
-                    Text(isGuest
-                         ? String(localized: "The host's progression will appear here in real time.")
-                         : String(localized: "Add chords or load a saved progression."))
+                    Text(liveRingEmptyMessage)
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -821,8 +1259,8 @@ struct SessionView: View {
                         key: viewModel.payload.key,
                         transposeSemitones: isGuest ? guestTranspose : 0,
                         capoFret: isGuest ? guestCapo : 0,
-                        activeChordID: ringShowsLiveChords ? nil : viewModel.payload.activeChordID,
-                        activeChordSymbol: ringShowsLiveChords
+                        activeChordID: liveRingChords != nil ? nil : viewModel.payload.activeChordID,
+                        activeChordSymbol: liveRingChords != nil
                             ? viewModel.payload.liveChordSymbol
                             : nil,
                         isInteractive: isHost,
@@ -830,14 +1268,17 @@ struct SessionView: View {
                         radius: layout.radius,
                         bubbleSize: layout.bubbleSize,
                         beatChangeHint: shouldPulseBeatHint,
+                        preferInstantActiveChanges: isHost && (!viewModel.midiSources.isEmpty || viewModel.isHostPianoLive),
                         onTap: { viewModel.setActiveChord($0) }
                     )
 
                     CurrentChordDisplay(
                         chord: centerChord,
-                        upcoming: viewModel.payload.isLiveChordsOnly || ringShowsLiveChords
-                            ? nil
-                            : viewModel.upcomingChord,
+                        upcoming: viewModel.hasInferredLiveProgression
+                            ? viewModel.upcomingChord
+                            : (viewModel.payload.isLiveChordsOnly || ringShowsLiveChords
+                                ? nil
+                                : viewModel.upcomingChord),
                         notation: ringNotation,
                         key: viewModel.payload.key,
                         transposeSemitones: isGuest ? guestTranspose : 0,
@@ -847,12 +1288,17 @@ struct SessionView: View {
                             && viewModel.sortedChords.isEmpty
                             && !viewModel.isLiveProgressionSession,
                         onAddChords: isHost ? { showProgressionEditor = true } : nil,
-                        isLiveFreestyle: centerShowsLivePiano
+                        isLiveFreestyle: !viewModel.hasInferredLiveProgression && (
+                            centerShowsLivePiano
                             || ringShowsLiveChords
-                            || (isHost && viewModel.isLiveProgressionSession && viewModel.sortedChords.isEmpty),
-                        isListeningForChord: ringShowsLiveChords
+                            || viewModel.payload.isLiveChordsOnly
+                            || (isHost && viewModel.isLiveProgressionSession && viewModel.sortedChords.isEmpty)
+                        ),
+                        isListeningForChord: !viewModel.hasInferredLiveProgression
+                            && (ringShowsLiveChords || viewModel.payload.isLiveChordsOnly)
                             && centerChord == nil
                             && (isHost ? !viewModel.payload.pianoNotes.isEmpty : hostSharingPiano),
+                        preferInstantActiveChanges: isHost && (!viewModel.midiSources.isEmpty || viewModel.isHostPianoLive),
                         diameter: layout.centerDiameter
                     )
                     .frame(width: layout.centerDiameter, height: layout.centerDiameter)
@@ -860,17 +1306,45 @@ struct SessionView: View {
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }
                 .overlay(alignment: .bottom) {
-                    ringStatusBadge
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .padding(.horizontal, sessionHorizontalPadding)
-                        .padding(.bottom, 8)
+                    if !showsLiveHostTransportDeck {
+                        ringStatusBadge
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, sessionHorizontalPadding)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
         }
         .frame(minHeight: ringContentMinHeight)
         .padding(.horizontal, sessionHorizontalPadding)
+    }
+
+    private var liveRingEmptyMessage: String {
+        if isGuest {
+            return String(localized: "The host's live chords will appear on the ring.")
+        }
+        if viewModel.usesLiveFreestyleRing || viewModel.payload.isLiveChordsOnly {
+            return String(localized: "Play on piano or MIDI — the ring shows your most-used chords (up to six). When you repeat a progression, Chordyx locks it automatically. Tap New Song when you start another song.")
+        }
+        return String(localized: "Add chords or load a saved progression.")
+    }
+
+    private var showsLiveRingSongControls: Bool {
+        isHost && (viewModel.usesLiveFreestyleRing || viewModel.payload.isLiveChordsOnly)
+    }
+
+    @ViewBuilder
+    private var newLiveSongRingButton: some View {
+        Button {
+            viewModel.startNewLiveSongRing()
+        } label: {
+            Label(String(localized: "New Song"), systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .tint(AppTheme.accentSecondary)
     }
 
     private var ringContentMinHeight: CGFloat {
@@ -879,6 +1353,25 @@ struct SessionView: View {
         #else
         isGuest ? 280 : 240
         #endif
+    }
+
+    @ViewBuilder
+    private func guestLiveViewStyleControls(includeRingSource: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GuestLiveViewStylePicker(nowOnly: $guestLiveNowOnly)
+            Text(
+                guestLiveNowOnly
+                    ? String(localized: "Following the host's current chord — no ring.")
+                    : String(localized: "Ring shows the full progression. Now shows only the chord being played.")
+            )
+            .font(.caption2)
+            .foregroundStyle(AppTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if includeRingSource, !guestLiveNowOnly {
+                RingSourcePicker(showsLiveChords: ringSourceBinding)
+            }
+        }
     }
 
     private var ringModeHeader: some View {
@@ -900,7 +1393,15 @@ struct SessionView: View {
                             )
                         }
                         Text("·")
-                        Text("Key of \(viewModel.payload.key.displayName)")
+                        if viewModel.payload.autoDetectKey {
+                            if viewModel.payload.isKeyAutoDetected {
+                                Text(String(format: String(localized: "Key of %@ · AI"), viewModel.payload.key.displayName))
+                            } else {
+                                Text(String(format: String(localized: "Key of %@ · AI listening"), viewModel.payload.key.displayName))
+                            }
+                        } else {
+                            Text(String(format: String(localized: "Key of %@"), viewModel.payload.key.displayName))
+                        }
                     }
                     .font(.caption.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
@@ -912,7 +1413,35 @@ struct SessionView: View {
                 leaveSessionButton(style: .header)
             }
 
-            RingSourcePicker(showsLiveChords: ringSourceBinding)
+            if isGuest {
+                guestLiveSessionStatusBar
+            }
+
+            if isGuest && viewModel.payload.hostLiveGrooveActive {
+                GuestHostLiveGrooveBanner(payload: viewModel.payload)
+            }
+
+            if isGuest && isLivePerformance {
+                guestLiveViewStyleControls(includeRingSource: true)
+            } else if !(isLivePerformance && viewModel.payload.isLiveChordsOnly) {
+                RingSourcePicker(showsLiveChords: ringSourceBinding)
+            }
+
+            if showsLiveRingSongControls {
+                HStack(spacing: 10) {
+                    if viewModel.liveRingSongNumber > 1 || !viewModel.payload.liveRingSegments.isEmpty {
+                        Text(String(format: String(localized: "Song %lld"), viewModel.liveRingSongNumber))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                    newLiveSongRingButton
+                    Spacer(minLength: 0)
+                }
+            }
+
+            if isHost, !isPractice, !isLivePerformance, viewModel.payload.isRemoteBackupEnabled, let code = viewModel.payload.remoteJoinCode {
+                hostRemoteJoinCodeSection(code: code)
+            }
         }
         .padding(.horizontal, sessionHorizontalPadding)
         .padding(.vertical, 8)
@@ -923,37 +1452,66 @@ struct SessionView: View {
         }
     }
 
+    private var guestDisplayTempoBPM: Double {
+        viewModel.displayedSessionTempoBPM
+    }
+
+    private var guestDisplayMetronomePlaying: Bool {
+        viewModel.displayedMetronomePlaying
+    }
+
+    private var guestLiveSessionStatusBar: some View {
+        LiveSessionStatusBar(
+            isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
+            isVampActive: viewModel.payload.isVampActive,
+            tempoBPM: guestDisplayTempoBPM,
+            isMetronomePlaying: guestDisplayMetronomePlaying,
+            syncQuality: viewModel.effectiveSyncQuality,
+            showSyncQuality: true,
+            hostLiveGrooveActive: viewModel.payload.hostLiveGrooveActive,
+            hostLiveGrooveStyle: viewModel.payload.hostLiveGrooveStyle,
+            hostLiveGroovePhase: viewModel.payload.hostLiveGroovePhase
+        )
+    }
+
     private func compactSessionHeader(maxHeight: CGFloat) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.payload.sessionName)
-                    .font(.headline.weight(.bold))
-                    .lineLimit(1)
-                if isGuest {
-                    if let host = viewModel.sessionManager.hostPeerDisplayName {
-                        Text("Following \(host)")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.textSecondary)
+        VStack(spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.payload.sessionName)
+                        .font(.headline.weight(.bold))
+                        .lineLimit(1)
+                    if isGuest {
+                        if let host = viewModel.sessionManager.hostPeerDisplayName {
+                            Text("Following \(host)")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        guestLiveSessionStatusBar
+                    } else if isLivePerformance {
+                        LiveSessionStatusBar(
+                            isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
+                            isVampActive: viewModel.payload.isVampActive,
+                            tempoBPM: viewModel.payload.tempoBPM,
+                            isMetronomePlaying: viewModel.payload.isMetronomePlaying
+                        )
                     }
-                    LiveSessionStatusBar(
-                        isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
-                        isVampActive: viewModel.payload.isVampActive,
-                        tempoBPM: viewModel.payload.tempoBPM,
-                        isMetronomePlaying: viewModel.payload.isMetronomePlaying,
-                        syncQuality: viewModel.sessionManager.syncQuality,
-                        showSyncQuality: true
-                    )
-                } else if isLivePerformance {
-                    LiveSessionStatusBar(
-                        isAutoAdvancePaused: viewModel.payload.isAutoAdvancePaused,
-                        isVampActive: viewModel.payload.isVampActive,
-                        tempoBPM: viewModel.payload.tempoBPM,
-                        isMetronomePlaying: viewModel.payload.isMetronomePlaying
-                    )
                 }
+                Spacer()
+                leaveSessionButton(style: .header)
             }
-            Spacer()
-            leaveSessionButton(style: .header)
+
+            if isGuest && viewModel.payload.hostLiveGrooveActive {
+                GuestHostLiveGrooveBanner(payload: viewModel.payload)
+            }
+
+            if isGuest && isLivePerformance {
+                guestLiveViewStyleControls(includeRingSource: false)
+            }
+
+            if isHost, !isPractice, !isLivePerformance, viewModel.payload.isRemoteBackupEnabled, let code = viewModel.payload.remoteJoinCode {
+                hostRemoteJoinCodeSection(code: code)
+            }
         }
         .padding(.horizontal, sessionHorizontalPadding)
         .padding(.vertical, 8)
@@ -963,51 +1521,128 @@ struct SessionView: View {
     }
 
     @ViewBuilder
-    private func bottomPanel(maxHeight: CGFloat) -> some View {
+    private func bottomPanel(maxHeight: CGFloat, viewportWidth: CGFloat) -> some View {
+        if usesLiveHostControlDock {
+            liveHostDockBottom(maxHeight: maxHeight, viewportWidth: viewportWidth)
+        } else {
+            legacyBottomPanel(maxHeight: maxHeight)
+        }
+    }
+
+    @ViewBuilder
+    private func liveHostDockBottom(maxHeight: CGFloat, viewportWidth: CGFloat) -> some View {
+        let layout = resolvedLiveDockLayout(viewportWidth: viewportWidth)
+        if layout == .sideRail {
+            LiveHostTransportStrip(
+                viewModel: viewModel,
+                selectedTab: liveDockSelectedTab,
+                sideRailVisible: $liveSideRailVisible,
+                bandCuePadVisible: $bandCuePadVisible,
+                needsLiveChordTransport: needsLiveChordTransport,
+                usesSideRail: true,
+                horizontalPadding: sessionHorizontalPadding,
+                onPiano: {
+                    showPianoOverlay = true
+                    viewModel.openPiano()
+                },
+                onToggleDock: {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        liveSideRailVisible.toggle()
+                    }
+                }
+            )
+        } else {
+            liveHostControlRail(style: .bottomDock(maxHeight: maxHeight))
+        }
+    }
+
+    private func liveHostControlRail(style: LiveHostControlRailStyle) -> some View {
+        LiveHostControlRail(
+            viewModel: viewModel,
+            store: store,
+            style: style,
+            isHost: isHost,
+            horizontalPadding: sessionHorizontalPadding,
+            selectedTab: liveDockSelectedTab,
+            layoutMode: liveDockLayoutMode,
+            heightPresetRaw: $liveDockHeightPresetRaw,
+            sideRailVisible: $liveSideRailVisible,
+            bandCuePadVisible: $bandCuePadVisible,
+            metronomePanelVisible: $metronomePanelVisible,
+            metronomeVolume: $metronomeVolume,
+            showPianoOverlay: $showPianoOverlay,
+            showFretboardOverlay: $showFretboardOverlay,
+            showProgressionEditor: $showProgressionEditor,
+            showMetadataEditor: $showMetadataEditor,
+            showMIDISettings: $showMIDISettings,
+            showPreServiceChecklist: $showPreServiceChecklist,
+            showExtendedFeaturesHub: $showExtendedFeaturesHub,
+            showAdvancedFeaturesHub: $showAdvancedFeaturesHub,
+            showGuestRoles: $showGuestRoles,
+            showRehearsalList: $showRehearsalList,
+            showJoinQR: $showJoinQR,
+            showBackingTrackImporter: $showBackingTrackImporter,
+            showSaveDialog: $showSaveDialog,
+            saveName: $saveName,
+            isKeyMenuPresented: $isKeyMenuPresented,
+            showPDFChart: $showPDFChart,
+            needsLiveChordTransport: needsLiveChordTransport,
+            keyControlTitle: keyControlTitle,
+            isSaved: isSaved,
+            isLastSetlistSong: isLastSetlistSong,
+            onCopyJoinCode: copyJoinCode
+        )
+    }
+
+    @ViewBuilder
+    private func legacyBottomPanel(maxHeight: CGFloat) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 0) {
                 if usesWideLiveCompactDeck {
                     wideLiveCompactHostPanelContent
                         .frame(minHeight: maxHeight, alignment: .center)
                 } else {
-                    if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
-                        ChordAdvanceBar(viewModel: viewModel)
-                            .padding(.horizontal, sessionHorizontalPadding)
-                            .padding(.top, 8)
-                    }
-
-                    if isHost || isPractice, !viewModel.payload.isLiveChordsOnly, !isLiveCompactHost {
-                        PerformanceModePicker(viewModel: viewModel)
-                            .padding(.horizontal, sessionHorizontalPadding)
-                            .padding(.vertical, 8)
-                        SessionDisplayModePicker(viewModel: viewModel)
-                            .padding(.horizontal, sessionHorizontalPadding)
-                            .padding(.bottom, 8)
-                    }
-
-                    if metronomePanelVisible {
-                        metronomeBar
-                    } else {
-                        collapsedMetronomeBar
-                    }
-
                     if isLiveCompactHost {
-                        liveCompactHostPanel
-                    } else if isHost {
-                        hostControls
-                    } else if isGuest {
-                        #if os(macOS)
-                        macGuestControls
-                        #else
-                        guestBanner
-                        #endif
+                        liveHostWorkflowDeck
+                    } else {
+                        if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
+                            ChordAdvanceBar(viewModel: viewModel)
+                                .padding(.horizontal, sessionHorizontalPadding)
+                                .padding(.top, 8)
+                        }
+
+                        if isHost || isPractice, !viewModel.payload.isLiveChordsOnly {
+                            PerformanceModePicker(viewModel: viewModel)
+                                .padding(.horizontal, sessionHorizontalPadding)
+                                .padding(.vertical, 8)
+                            SessionDisplayModePicker(viewModel: viewModel)
+                                .padding(.horizontal, sessionHorizontalPadding)
+                                .padding(.bottom, 8)
+                        }
+
+                        if metronomePanelVisible {
+                            metronomeBar
+                        } else {
+                            collapsedMetronomeBar(compact: false)
+                        }
+
+                        if isHost {
+                            hostControls
+                        } else if isGuest {
+                            #if os(macOS)
+                            macGuestControls
+                            #else
+                            guestBanner
+                            #endif
+                        }
                     }
                 }
             }
             .padding(.bottom, 8)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(maxHeight: maxHeight)
+        .frame(height: usesPhonePortraitLiveSplit ? maxHeight : nil)
+        .frame(maxHeight: usesPhonePortraitLiveSplit ? nil : maxHeight)
         .frame(maxWidth: sessionPanelMaxWidth)
         .frame(maxWidth: .infinity)
         .safeAreaPadding(.bottom, 4)
@@ -1020,17 +1655,16 @@ struct SessionView: View {
 
     private var wideLiveCompactHostPanelContent: some View {
         VStack(spacing: 22) {
-            HStack(alignment: .top, spacing: 18) {
-                if (viewModel.canDriveSession || viewModel.isCoHost), !viewModel.payload.isLiveChordsOnly {
-                    ChordAdvanceBar(viewModel: viewModel)
-                        .frame(width: 196)
-                }
+            if needsLiveChordTransport {
+                LiveChordTransportCompact(viewModel: viewModel)
+            }
 
+            HStack(alignment: .top, spacing: 18) {
                 Group {
                     if metronomePanelVisible {
                         metronomeBar
                     } else {
-                        collapsedMetronomeBar
+                        collapsedMetronomeBar(compact: false)
                     }
                 }
                 .padding(.horizontal, -sessionHorizontalPadding)
@@ -1038,130 +1672,197 @@ struct SessionView: View {
                 .frame(maxWidth: .infinity)
 
                 if viewModel.canDriveSession {
-                    BackingTrackPanel(viewModel: viewModel) {
+                    BackingTrackPanel(viewModel: viewModel, onImport: {
                         showBackingTrackImporter = true
-                    }
+                    }, style: .compact)
                     .frame(maxWidth: 320)
                 }
             }
 
-            LiveCuePad(viewModel: viewModel, usesWideLayout: true)
+            #if os(macOS) || os(iOS)
+            if viewModel.canDriveSession {
+                SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
+            }
+            #endif
 
-            liveCompactSecondaryActions(wide: true)
+            wideLiveBandCueSection
+
+            liveCompactIconToolbar
         }
         .padding(.horizontal, sessionHorizontalPadding)
         .padding(.vertical, 12)
     }
 
-    private var liveCompactHostPanel: some View {
-        VStack(spacing: 14) {
-            if viewModel.canDriveSession {
-                BackingTrackPanel(viewModel: viewModel) {
-                    showBackingTrackImporter = true
-                }
-                .padding(.horizontal, sessionHorizontalPadding)
-            }
-
-            LiveCuePad(viewModel: viewModel)
-                .padding(.horizontal, sessionHorizontalPadding)
-
-            liveCompactSecondaryActions(wide: false)
+    @ViewBuilder
+    private var liveBandCueSection: some View {
+        if bandCuePadVisible {
+            LiveCuePad(viewModel: viewModel, style: .liveCompact)
                 .padding(.horizontal, sessionHorizontalPadding)
         }
-        .padding(.top, 8)
     }
 
-    private func liveCompactSecondaryActions(wide: Bool) -> some View {
-        Group {
-            if wide {
-                HStack(spacing: 12) {
-                    liveCompactMoreToolsButton
-                    liveCompactPianoButton
-                    liveCompactViewMenu
-                    liveCompactPreServiceButton
-                }
+    @ViewBuilder
+    private var wideLiveBandCueSection: some View {
+        if bandCuePadVisible {
+            LiveCuePad(viewModel: viewModel, usesWideLayout: true)
+        }
+    }
+
+    private var liveHostWorkflowDeck: some View {
+        VStack(spacing: 10) {
+            if needsLiveChordTransport {
+                LiveChordTransportCompact(viewModel: viewModel)
+                    .padding(.horizontal, sessionHorizontalPadding)
+            }
+
+            liveBandCueSection
+
+            liveCompactIconToolbar
+                .padding(.horizontal, sessionHorizontalPadding)
+
+            if metronomePanelVisible {
+                metronomeBar
             } else {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        liveCompactMoreToolsButton
-                        liveCompactPianoButton
-                    }
+                collapsedMetronomeBar(compact: true)
+            }
 
-                    HStack(spacing: 10) {
-                        liveCompactViewMenu
-                        liveCompactPreServiceButton
-                    }
+            if viewModel.canDriveSession {
+                BackingTrackPanel(viewModel: viewModel, onImport: {
+                    showBackingTrackImporter = true
+                }, style: .compact)
+                .padding(.horizontal, sessionHorizontalPadding)
+            }
+
+            #if os(macOS) || os(iOS)
+            if viewModel.canDriveSession {
+                SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
+                    .padding(.horizontal, sessionHorizontalPadding)
+            }
+            #endif
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var liveCompactIconToolbar: some View {
+        liveCompactIconToolbarButtons
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .glassCard()
+            .foregroundStyle(AppTheme.textPrimary)
+    }
+
+    private var liveCompactToolbarSpacing: CGFloat {
+        #if os(iOS)
+        PlatformDevice.isPhone ? 6 : 8
+        #else
+        0
+        #endif
+    }
+
+    private var liveCompactIconToolbarButtons: some View {
+        HStack(spacing: liveCompactToolbarSpacing) {
+            liveCompactToolbarButton(
+                icon: bandCuePadVisible ? "megaphone.fill" : "megaphone",
+                label: liveCompactToolbarTitle(full: String(localized: "Band Cues"), short: String(localized: "Cues")),
+                accessibilityLabel: String(localized: "Band Cues")
+            ) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    bandCuePadVisible.toggle()
                 }
             }
-        }
-        .foregroundStyle(AppTheme.textPrimary)
-    }
-
-    private var liveCompactMoreToolsButton: some View {
-        Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                liveToolsExpanded = true
-            }
-        } label: {
-            Label(String(localized: "More Tools"), systemImage: "slider.horizontal.3")
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-    }
-
-    private var liveCompactPianoButton: some View {
-        Button {
-            showPianoOverlay = true
-            viewModel.openPiano()
-        } label: {
-            Label(String(localized: "Piano"), systemImage: "pianokeys")
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-    }
-
-    private var liveCompactViewMenu: some View {
-        Menu {
-            Picker("View", selection: Binding(
-                get: { viewModel.payload.displayMode },
-                set: { viewModel.setDisplayMode($0) }
-            )) {
-                ForEach(SessionDisplayMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
+            .background {
+                if bandCuePadVisible {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(AppTheme.accent.opacity(0.14))
                 }
             }
-        } label: {
-            Label(String(localized: "View"), systemImage: "rectangle.on.rectangle")
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            liveCompactToolbarButton(
+                icon: "slider.horizontal.3",
+                label: liveCompactToolbarTitle(full: String(localized: "More Tools"), short: String(localized: "Tools")),
+                accessibilityLabel: String(localized: "More Tools")
+            ) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    liveToolsExpanded = true
+                }
+            }
+
+            liveCompactToolbarButton(
+                icon: "pianokeys",
+                label: String(localized: "Piano"),
+                accessibilityLabel: String(localized: "Piano")
+            ) {
+                showPianoOverlay = true
+                viewModel.openPiano()
+            }
+
+            SessionDisplayModeMenu(viewModel: viewModel) {
+                liveCompactToolbarLabel(
+                    icon: "rectangle.on.rectangle",
+                    label: String(localized: "View"),
+                    accessibilityLabel: String(localized: "View")
+                )
+            }
+
+            liveCompactToolbarButton(
+                icon: "checklist",
+                label: liveCompactToolbarTitle(full: String(localized: "Pre-Service"), short: String(localized: "Pre-Svc")),
+                accessibilityLabel: String(localized: "Pre-Service")
+            ) {
+                showPreServiceChecklist = true
+            }
         }
     }
 
-    private var liveCompactPreServiceButton: some View {
-        Button {
-            showPreServiceChecklist = true
-        } label: {
-            Label(String(localized: "Pre-Service"), systemImage: "checklist")
-                .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(AppTheme.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private func liveCompactToolbarTitle(full: String, short: String) -> String {
+        #if os(iOS)
+        if PlatformDevice.isPhone { return short }
+        #endif
+        return full
+    }
+
+    private func liveCompactToolbarButton(
+        icon: String,
+        label: String,
+        accessibilityLabel: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            liveCompactToolbarLabel(icon: icon, label: label, accessibilityLabel: accessibilityLabel)
         }
+        .buttonStyle(.plain)
+    }
+
+    private func liveCompactToolbarLabel(
+        icon: String,
+        label: String,
+        accessibilityLabel: String? = nil
+    ) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel ?? label)
+        .accessibilityAddTraits(.isButton)
     }
 
     private func presentPreServiceChecklistIfNeeded() {
         guard shouldOfferPreServiceChecklist else { return }
         showPreServiceChecklist = true
+    }
+
+    private func markPreServiceChecklistDismissedForSession() {
+        GuestDisplaySettings.preServiceChecklistDismissedToken = viewModel.payload.sessionToken.uuidString
     }
 
     @ViewBuilder
@@ -1207,7 +1908,7 @@ struct SessionView: View {
                     }
                     if isGuest {
                         Text("·")
-                        Label(viewModel.sessionManager.syncQuality.label, systemImage: "waveform.path.ecg")
+                        Label(viewModel.effectiveSyncQuality.label, systemImage: viewModel.isRemoteLinkActive ? "icloud.fill" : "waveform.path.ecg")
                     }
                 }
                 .font(.caption.weight(.medium))
@@ -1224,6 +1925,14 @@ struct SessionView: View {
 
                 if viewModel.role == .host, !isPractice {
                     connectedMusiciansSection
+                    if viewModel.payload.isRemoteBackupEnabled, let code = viewModel.payload.remoteJoinCode {
+                        hostRemoteJoinCodeSection(code: code)
+                    }
+                } else if isGuest, viewModel.isRemoteLinkActive {
+                    Label("Connected via Internet", systemImage: "icloud.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(AppTheme.accentSecondary)
+                        .padding(.top, 4)
                 } else if isGuest, let hostName = viewModel.sessionManager.connectedPeers.first?.displayName {
                     Label("Connected to \(hostName)", systemImage: "star.fill")
                         .font(.caption.weight(.medium))
@@ -1353,7 +2062,7 @@ struct SessionView: View {
                             .font(.caption2)
                             .foregroundStyle(.red)
                     } else if isHost {
-                        Text("iPhone/iPad must be on the same Wi‑Fi and allow Local Network for Chordyx.")
+                        Text("Same Wi‑Fi works best. Share the Internet join code below for cellular backup.")
                             .font(.caption2)
                             .foregroundStyle(AppTheme.textSecondary)
                     }
@@ -1379,6 +2088,32 @@ struct SessionView: View {
             }
     }
 
+    private func copyJoinCode(_ code: String) {
+        RemoteJoinCode.copyToClipboard(code)
+    }
+
+    @ViewBuilder
+    private func hostRemoteJoinCodeSection(code: String) -> some View {
+        if showInternetJoinCode {
+            HostRemoteJoinCodeBanner(
+                code: code,
+                cloudError: viewModel.cloudRelay.lastError,
+                isCloudReady: viewModel.cloudRelay.isCloudKitConfigured,
+                isRelayLive: viewModel.cloudRelay.isRelayLive,
+                transportName: viewModel.cloudRelay.activeTransportName,
+                onCopy: { copyJoinCode(code) },
+                onHide: { showInternetJoinCode = false },
+                onRetry: {
+                    Task { await viewModel.cloudRelay.retryHostingNow() }
+                }
+            )
+        } else {
+            HostRemoteJoinCodeCollapsed {
+                showInternetJoinCode = true
+            }
+        }
+    }
+
     private func musicianChip(name: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "person.fill")
@@ -1396,7 +2131,10 @@ struct SessionView: View {
     }
 
     private var hostSharingPiano: Bool {
-        viewModel.payload.isPianoActive || !viewModel.payload.pianoNotes.isEmpty
+        viewModel.payload.isPianoActive
+            || !viewModel.payload.pianoNotes.isEmpty
+            || viewModel.payload.liveChordSymbol != nil
+            || !viewModel.payload.freestyleChordSymbols.isEmpty
     }
 
     private func dismissPianoOverlay() {
@@ -1490,6 +2228,52 @@ struct SessionView: View {
         .padding(.vertical, 2)
     }
 
+    private var inferredProgressionBadge: some View {
+        let chords = viewModel.sortedChords
+        let activeIndex = chords.firstIndex { $0.id == viewModel.payload.activeChordID }
+
+        return HStack(spacing: 8) {
+            Text(String(localized: "Progression detected"))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.background)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AppTheme.accent)
+                .clipShape(Capsule())
+
+            if let index = activeIndex, index < chords.count {
+                Text("\(index + 1) / \(chords.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.background)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.accentSecondary)
+                    .clipShape(Capsule())
+
+                chords[index]
+                    .chordText(for: viewModel.payload.notation, key: viewModel.payload.key, size: 15, weight: .semibold)
+                    .foregroundStyle(AppTheme.textPrimary)
+            } else {
+                Text(chords.map(\.symbolName).joined(separator: " · "))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if isHost {
+                Text(String(localized: "New Song to reset"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Progression detected"))
+    }
+
     private var liveChordBadge: some View {
         HStack(spacing: 8) {
             Text("LIVE")
@@ -1515,12 +2299,22 @@ struct SessionView: View {
             }
 
             if viewModel.freestyleChordEntries.count > 1 {
-                Text("· \(viewModel.freestyleChordEntries.count) chords")
+                Text("· \(viewModel.freestyleChordEntries.count) top chords")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            if viewModel.liveRingSongNumber > 1 {
+                Text("· \(String(format: String(localized: "Song %lld"), viewModel.liveRingSongNumber))")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
             Spacer()
+
+            if showsLiveRingSongControls {
+                newLiveSongRingButton
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
@@ -1629,6 +2423,21 @@ struct SessionView: View {
 
     private var hostControls: some View {
         VStack(spacing: 14) {
+            HStack {
+                SessionFeaturesMenu(
+                    viewModel: viewModel,
+                    store: store,
+                    showGuestRoles: $showGuestRoles,
+                    showRehearsalList: $showRehearsalList,
+                    showJoinQR: $showJoinQR,
+                    showExtendedFeaturesHub: $showExtendedFeaturesHub,
+                    showAdvancedFeaturesHub: $showAdvancedFeaturesHub
+                )
+                VocalKeyPicker(viewModel: viewModel)
+                Spacer()
+            }
+            .padding(.horizontal, sessionHorizontalPadding)
+
             if isLivePerformance {
                 Button {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
@@ -1644,6 +2453,16 @@ struct SessionView: View {
                 }
                 .foregroundStyle(AppTheme.accent)
                 .padding(.horizontal, sessionHorizontalPadding)
+
+                if viewModel.payload.isRemoteBackupEnabled, let code = viewModel.payload.remoteJoinCode {
+                    HostRemoteJoinCodeCompactChip(
+                        code: code,
+                        isRelayLive: viewModel.cloudRelay.isRelayLive,
+                        onCopy: { copyJoinCode(code) },
+                        onShowQR: { showJoinQR = true }
+                    )
+                    .padding(.horizontal, sessionHorizontalPadding)
+                }
             }
 
             if viewModel.payload.setlistName != nil {
@@ -1685,13 +2504,15 @@ struct SessionView: View {
                 .padding(.horizontal, sessionHorizontalPadding)
             }
 
-            LiveCuePad(viewModel: viewModel)
-                .padding(.horizontal, sessionHorizontalPadding)
+            if !isLivePerformance {
+                LiveCuePad(viewModel: viewModel)
+                    .padding(.horizontal, sessionHorizontalPadding)
+            }
 
-            if viewModel.canDriveSession {
-                BackingTrackPanel(viewModel: viewModel) {
+            if viewModel.canDriveSession, !isLivePerformance {
+                BackingTrackPanel(viewModel: viewModel, onImport: {
                     showBackingTrackImporter = true
-                }
+                })
                 .padding(.horizontal, sessionHorizontalPadding)
             }
 
@@ -1720,33 +2541,7 @@ struct SessionView: View {
             .padding(.horizontal, sessionHorizontalPadding)
 
             LazyVGrid(columns: hostControlColumns, spacing: 10) {
-                Menu {
-                    Picker("Notation", selection: Binding(
-                        get: { viewModel.payload.notation },
-                        set: { viewModel.updateNotation($0) }
-                    )) {
-                        ForEach(ChordNotation.allCases) { notation in
-                            Text(notation.label).tag(notation)
-                        }
-                    }
-                } label: {
-                    controlChip(icon: "textformat", title: viewModel.payload.notation.chipLabel, fillWidth: true)
-                }
-
-                Menu {
-                    Section("Transpose to") {
-                        Picker("Key", selection: Binding(
-                            get: { viewModel.payload.key },
-                            set: { viewModel.transpose(to: $0) }
-                        )) {
-                            ForEach(MusicalKey.allCases) { key in
-                                Text(key.displayName).tag(key)
-                            }
-                        }
-                    }
-                } label: {
-                    controlChip(icon: "arrow.up.arrow.down", title: "Key \(viewModel.payload.key.displayName)", fillWidth: true)
-                }
+                keyControlMenu
 
                 Button {
                     showPianoOverlay = true
@@ -1778,6 +2573,18 @@ struct SessionView: View {
                     showMIDISettings = true
                 } label: {
                     controlChip(icon: "cable.connector", title: "MIDI", fillWidth: true)
+                }
+
+                Button {
+                    viewModel.setRemoteBackupEnabled(!viewModel.payload.isRemoteBackupEnabled)
+                } label: {
+                    controlChip(
+                        icon: "icloud.fill",
+                        title: viewModel.payload.isRemoteBackupEnabled
+                            ? String(localized: "Internet On")
+                            : String(localized: "Internet Off"),
+                        fillWidth: true
+                    )
                 }
 
                 #if os(iOS)
@@ -1951,9 +2758,14 @@ struct SessionView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             Toggle(isOn: $guestMetronomeAudioEnabled) {
-                Label("Metronome Click", systemImage: "speaker.wave.2.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Metronome Click", systemImage: "speaker.wave.2.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text("Hear the click on your phone — including when following the Mac host groove")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
             }
             .tint(AppTheme.accent)
             .padding(.horizontal, 16)
@@ -2027,7 +2839,7 @@ struct SessionView: View {
         .padding(.top, 4)
     }
 
-    private var collapsedMetronomeBar: some View {
+    private func collapsedMetronomeBar(compact: Bool) -> some View {
         Button {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                 metronomePanelVisible = true
@@ -2038,13 +2850,15 @@ struct SessionView: View {
                     .foregroundStyle(AppTheme.accentSecondary)
 
                 Text("Metronome")
-                    .font(.subheadline.weight(.semibold))
+                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                if viewModel.payload.isMetronomePlaying {
-                    Text("\(Int(viewModel.payload.tempoBPM)) BPM · \(viewModel.payload.beatsPerBar)/\(viewModel.payload.beatUnit)")
-                        .font(.caption.weight(.medium))
+                if guestDisplayMetronomePlaying {
+                    Text("\(TempoMarking.caption(for: guestDisplayTempoBPM)) · \(viewModel.payload.beatsPerBar)/\(viewModel.payload.beatUnit)")
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
 
                 Spacer()
@@ -2053,210 +2867,44 @@ struct SessionView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, compact ? 14 : 16)
+            .padding(.vertical, compact ? 10 : 12)
             .glassCard()
         }
         .padding(.horizontal, sessionHorizontalPadding)
-        .padding(.bottom, 12)
+        .padding(.bottom, compact ? 0 : 12)
     }
 
     private var metronomeBar: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                Button {
-                    viewModel.toggleMetronome()
-                } label: {
-                    Image(systemName: viewModel.payload.isMetronomePlaying ? "pause.fill" : "play.fill")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(AppTheme.background)
-                        .frame(width: 48, height: 48)
-                        .background(viewModel.payload.isMetronomePlaying ? AppTheme.accent : AppTheme.accentSecondary)
-                        .clipShape(Circle())
-                }
-                .disabled(!isHost)
-                .opacity(isHost ? 1 : 0.5)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(Int(viewModel.payload.tempoBPM))")
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .contentTransition(.numericText())
-                        Text("BPM")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.textSecondary)
-                    }
-
-                    beatDots
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        metronomePanelVisible = false
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(Circle())
-                }
-                .accessibilityLabel("Hide metronome")
-            }
-
-            if isHost {
-                HStack(spacing: 10) {
-                    tapTempoButton
-                    timeSignatureMenu
-                    Spacer(minLength: 0)
-                }
-
-                Stepper(value: Binding(
-                    get: { viewModel.payload.countInBars },
-                    set: { viewModel.setCountInBars($0) }
-                ), in: 0...4) {
-                    Text("Count-in: \(viewModel.payload.countInBars) bar\(viewModel.payload.countInBars == 1 ? "" : "s")")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
-
-                HStack(spacing: 12) {
-                    Button {
-                        viewModel.setTempo(viewModel.payload.tempoBPM - 1)
-                    } label: {
-                        stepperIcon("minus")
-                    }
-
-                    Slider(
-                        value: Binding(
-                            get: { viewModel.payload.tempoBPM },
-                            set: { viewModel.setTempo($0) }
-                        ),
-                        in: SessionViewModel.minBPM...SessionViewModel.maxBPM,
-                        step: 1
-                    )
-                    .tint(AppTheme.accent)
-
-                    Button {
-                        viewModel.setTempo(viewModel.payload.tempoBPM + 1)
-                    } label: {
-                        stepperIcon("plus")
-                    }
+        SessionMetronomePanel(
+            viewModel: viewModel,
+            isHost: isHost,
+            metronomeVolume: $metronomeVolume,
+            horizontalPadding: sessionHorizontalPadding,
+            showsCollapseButton: true,
+            onCollapse: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    metronomePanelVisible = false
                 }
             }
-
-            volumeRow
-        }
-        .padding(16)
-        .glassCard()
-        .padding(.horizontal, sessionHorizontalPadding)
+        )
         .padding(.bottom, 12)
-        .onAppear { viewModel.metronome.volume = Float(metronomeVolume) }
-        .onChange(of: metronomeVolume) { _, newValue in
-            viewModel.metronome.volume = Float(newValue)
-        }
     }
 
-    private var volumeRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                metronomeVolume = metronomeVolume > 0 ? 0 : 0.8
-            } label: {
-                Image(systemName: volumeIcon)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .frame(width: 24)
-            }
-
-            Slider(value: $metronomeVolume, in: 0...1)
-                .tint(AppTheme.accentSecondary)
-
-            Text("\(Int(metronomeVolume * 100))%")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(AppTheme.textSecondary)
-                .frame(width: 40, alignment: .trailing)
-        }
-    }
-
-    private var volumeIcon: String {
-        if metronomeVolume == 0 { return "speaker.slash.fill" }
-        if metronomeVolume < 0.4 { return "speaker.fill" }
-        if metronomeVolume < 0.75 { return "speaker.wave.1.fill" }
-        return "speaker.wave.2.fill"
-    }
-
-    private var beatDots: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<max(1, viewModel.payload.beatsPerBar), id: \.self) { index in
-                let isCurrent = viewModel.payload.isMetronomePlaying && viewModel.metronome.currentBeat == index
-                Circle()
-                    .fill(isCurrent ? (index == 0 ? AppTheme.accent : AppTheme.accentSecondary) : AppTheme.chordInactive)
-                    .frame(width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8)
-                    .animation(.easeOut(duration: 0.1), value: viewModel.metronome.currentBeat)
-            }
-        }
-        .frame(height: 14)
-    }
-
-    private var tapTempoButton: some View {
+    private var keyControlMenu: some View {
         Button {
-            registerTap()
+            isKeyMenuPresented = true
         } label: {
-            controlChip(icon: "hand.tap.fill", title: "Tap Tempo")
+            controlChip(
+                icon: viewModel.payload.autoDetectKey ? "wand.and.stars" : "arrow.up.arrow.down",
+                title: keyControlTitle,
+                fillWidth: true
+            )
         }
-    }
-
-    private func registerTap() {
-        let now = Date()
-        // A long gap means a fresh count-in, so start over.
-        if let last = tapTimes.last, now.timeIntervalSince(last) > 2 {
-            tapTimes.removeAll()
+        .buttonStyle(.plain)
+        .platformSheet(isPresented: $isKeyMenuPresented) {
+            SessionMusicalKeyPicker(viewModel: viewModel, isPresented: $isKeyMenuPresented)
         }
-        tapTimes.append(now)
-        if tapTimes.count > 5 {
-            tapTimes.removeFirst(tapTimes.count - 5)
-        }
-        guard tapTimes.count >= 2 else { return }
-
-        var intervals: [TimeInterval] = []
-        for i in 1..<tapTimes.count {
-            intervals.append(tapTimes[i].timeIntervalSince(tapTimes[i - 1]))
-        }
-        let average = intervals.reduce(0, +) / Double(intervals.count)
-        guard average > 0 else { return }
-        viewModel.setTempo(60.0 / average)
-    }
-
-    private var timeSignatureMenu: some View {
-        Menu {
-            Picker("Time Signature", selection: Binding(
-                get: { "\(viewModel.payload.beatsPerBar)/\(viewModel.payload.beatUnit)" },
-                set: { id in
-                    if let signature = TimeSignature.presets.first(where: { $0.id == id }) {
-                        viewModel.setTimeSignature(beats: signature.beats, unit: signature.unit)
-                    }
-                }
-            )) {
-                ForEach(TimeSignature.presets) { signature in
-                    Text(signature.label).tag(signature.id)
-                }
-            }
-        } label: {
-            controlChip(icon: "metronome", title: "\(viewModel.payload.beatsPerBar)/\(viewModel.payload.beatUnit)")
-        }
-    }
-
-    private func stepperIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(AppTheme.textPrimary)
-            .frame(width: 38, height: 38)
-            .background(AppTheme.surfaceElevated)
-            .clipShape(Circle())
     }
 
     private func controlChip(icon: String, title: String, fillWidth: Bool = false) -> some View {
