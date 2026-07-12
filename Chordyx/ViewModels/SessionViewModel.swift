@@ -77,6 +77,8 @@ final class SessionViewModel {
     private var midiSyncTask: Task<Void, Never>?
     private var pianoSideEffectsTask: Task<Void, Never>?
     private var liveChordSymbolClearTask: Task<Void, Never>?
+    private var pianoNotesSyncTask: Task<Void, Never>?
+    private var lastSyncedPianoNotes: [Int] = []
     var groovePreviewTask: Task<Void, Never>?
     private var outboundSyncTask: Task<Void, Never>?
     private var outboundSyncNeedsFull = false
@@ -685,6 +687,7 @@ final class SessionViewModel {
             .filter { PianoNote.keyboardRange.contains($0) }
 
         let priorSymbol = payload.liveChordSymbol
+        let priorNotes = payload.pianoNotes
         // Reassign payload so @Observable reliably refreshes PianoView key highlights.
         var nextPayload = payload
         nextPayload.pianoNotes = notes
@@ -699,21 +702,49 @@ final class SessionViewModel {
             updateLiveChordSymbol(from: notes)
         }
 
-        if priorSymbol != payload.liveChordSymbol {
-            #if os(macOS) || os(iOS)
-            if soloAccompanimentEnabled, soloTempoLocked, isSoloDrumGroovePlaying {
-                syncLiveCoalesced()
-            } else {
-                syncLiveImmediate()
-            }
-            #else
-            syncLiveImmediate()
-            #endif
-        } else {
-            syncLiveCoalesced()
-        }
+        // Stabilize sync so chord attacks arrive as a set and brief lifts don't chop guest keys.
+        scheduleStabilizedPianoNotesSync(
+            notes: notes,
+            priorNotes: priorNotes,
+            priorSymbol: priorSymbol
+        )
 
         schedulePianoSideEffects(notes: notes)
+    }
+
+    /// Waits briefly while a chord is forming, and delays note-off sync so guests keep full chords.
+    private func scheduleStabilizedPianoNotesSync(
+        notes: [Int],
+        priorNotes: [Int],
+        priorSymbol: String?
+    ) {
+        pianoNotesSyncTask?.cancel()
+
+        let notesGrew = notes.count > priorNotes.count
+        let notesShrank = notes.count < priorNotes.count
+        let delayMs: UInt64
+        if notes.isEmpty {
+            delayMs = 140
+        } else if notesGrew && notes.count < 3 {
+            delayMs = 55 // gather remaining chord tones from MIDI
+        } else if notesShrank {
+            delayMs = 110 // ignore brief finger lifts
+        } else if priorSymbol != payload.liveChordSymbol {
+            delayMs = 20
+        } else {
+            delayMs = 35
+        }
+
+        pianoNotesSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delayMs))
+            guard let self, !Task.isCancelled else { return }
+            // Always publish the latest held notes at flush time (may have grown during wait).
+            let current = self.payload.pianoNotes
+            guard current != self.lastSyncedPianoNotes
+                    || self.payload.liveChordSymbol != self.lastSyncedLiveChordSymbol else { return }
+            self.lastSyncedPianoNotes = current
+            self.syncLiveImmediate()
+        }
     }
 
     private func scheduleLiveChordSymbolClear() {
@@ -2509,6 +2540,9 @@ final class SessionViewModel {
         pianoSideEffectsTask = nil
         liveChordSymbolClearTask?.cancel()
         liveChordSymbolClearTask = nil
+        pianoNotesSyncTask?.cancel()
+        pianoNotesSyncTask = nil
+        lastSyncedPianoNotes = []
         cueClearTask?.cancel()
         cueClearTask = nil
         songEndingTask?.cancel()
@@ -2769,15 +2803,19 @@ final class SessionViewModel {
                 sessionToken: payload.sessionToken
             )
             let isLiveBurst = hadLive && !sendFull
-            if payload.isRemoteBackupEnabled, let code = payload.remoteJoinCode, sendFull || liveChordChanged {
-                let debounceMs = sendFull ? 250 : (liveChordChanged ? 100 : 350)
+            let pianoNotesChanged = payload.pianoNotes != lastSyncedPianoNotes
+            if payload.isRemoteBackupEnabled, let code = payload.remoteJoinCode,
+               sendFull || liveChordChanged || pianoNotesChanged {
+                let debounceMs = sendFull ? 250 : (liveChordChanged || pianoNotesChanged ? 80 : 350)
                 let cloudPayload = isLiveBurst ? payload.forHighFrequencyPeerSync() : payload
                 cloudRelay.schedulePublish(payload: cloudPayload, joinCode: code, debounceMs: debounceMs)
             }
             if isLiveBurst {
                 liveWireRevision &+= 1
+                lastSyncedPianoNotes = payload.pianoNotes
                 sessionManager.broadcastLive(payload.liveChordWire(revision: liveWireRevision))
             } else {
+                lastSyncedPianoNotes = payload.pianoNotes
                 sessionManager.broadcast(payload, mode: .reliable)
             }
         }
