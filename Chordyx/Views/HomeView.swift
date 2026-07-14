@@ -181,163 +181,132 @@ struct HomeView: View {
     private var homeLayoutExpanded: some View {
         VStack(alignment: .leading, spacing: 28) {
             homeSectionHeader("Live Session")
-
             HStack(spacing: gridSpacing) {
-                actionButton(
-                    title: "Host a Session",
-                    subtitle: String(localized: "Invite musicians — chord ring or live piano"),
-                    icon: "music.mic",
-                    style: .card
-                ) { showHostSetup = true }
-
-                actionButton(
-                    title: "Join a Session",
-                    subtitle: String(localized: "Connect to a nearby host"),
-                    icon: "person.2.wave.2",
-                    style: .card
-                ) {
-                    viewModel.beginJoining()
-                    showJoinList = true
-                }
+                homeHostButton(style: .card)
+                homeJoinButton(style: .card)
             }
 
-            homeSectionHeader("Library & Tools")
-
+            homeSectionHeader("Library")
             HStack(spacing: gridSpacing) {
-                actionButton(
-                    title: "My Progressions",
-                    subtitle: progressionsSubtitle,
-                    icon: "bookmark.fill",
-                    style: .card
-                ) { showLibrary = true }
-
-                actionButton(
-                    title: "Practice Solo",
-                    subtitle: String(localized: "Rehearse with the ring and metronome"),
-                    icon: "metronome",
-                    style: .card
-                ) { showPracticePicker = true }
-
-                actionButton(
-                    title: "Import Song",
-                    subtitle: String(localized: "Search by title — chords and lyrics from the web"),
-                    icon: "arrow.down.doc.fill",
-                    style: .card
-                ) { showSongImport = true }
-
-                actionButton(
-                    title: "Host a Setlist",
-                    subtitle: String(localized: "Play multiple songs in one session"),
-                    icon: "list.bullet.rectangle",
-                    style: .card
-                ) { showSetlistPicker = true }
+                homeProgressionsButton(style: .card)
+                homeImportButton(style: .card)
             }
+
+            homeMoreSection(style: .card)
         }
     }
 
     private func homeLayoutGrid(columns: Int) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            homeSectionHeader("Get Started")
+            homeSectionHeader("Live Session")
 
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns),
                 spacing: gridSpacing
             ) {
-                actionButton(
-                    title: "Host a Session",
-                    subtitle: String(localized: "Invite musicians — chord ring or live piano"),
-                    icon: "music.mic",
-                    style: .card
-                ) { showHostSetup = true }
-
-                actionButton(
-                    title: "Join a Session",
-                    subtitle: String(localized: "Connect to a nearby host"),
-                    icon: "person.2.wave.2",
-                    style: .card
-                ) {
-                    viewModel.beginJoining()
-                    showJoinList = true
-                }
-
-                actionButton(
-                    title: "My Progressions",
-                    subtitle: progressionsSubtitle,
-                    icon: "bookmark.fill",
-                    style: .card
-                ) { showLibrary = true }
-
-                actionButton(
-                    title: "Practice Solo",
-                    subtitle: String(localized: "Rehearse with the ring and metronome"),
-                    icon: "metronome",
-                    style: .card
-                ) { showPracticePicker = true }
-
-                actionButton(
-                    title: "Import Song",
-                    subtitle: String(localized: "Search by title — chords and lyrics from the web"),
-                    icon: "arrow.down.doc.fill",
-                    style: .card
-                ) { showSongImport = true }
-
-                actionButton(
-                    title: "Host a Setlist",
-                    subtitle: String(localized: "Play multiple songs in one session"),
-                    icon: "list.bullet.rectangle",
-                    style: .card
-                ) { showSetlistPicker = true }
+                homeHostButton(style: .card)
+                homeJoinButton(style: .card)
             }
+
+            homeSectionHeader("Library")
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columns),
+                spacing: gridSpacing
+            ) {
+                homeProgressionsButton(style: .card)
+                homeImportButton(style: .card)
+            }
+
+            homeMoreSection(style: .card)
         }
     }
 
     private var homeLayoutStack: some View {
         VStack(spacing: gridSpacing) {
-            actionButton(
-                title: "Host a Session",
-                subtitle: String(localized: "Invite musicians — chord ring or live piano"),
-                icon: "music.mic",
-                style: .list
-            ) { showHostSetup = true }
-
-            actionButton(
-                title: "Join a Session",
-                subtitle: String(localized: "Connect to a nearby host"),
-                icon: "person.2.wave.2",
-                style: .list
-            ) {
-                viewModel.beginJoining()
-                showJoinList = true
-            }
-
-            actionButton(
-                title: "My Progressions",
-                subtitle: progressionsSubtitle,
-                icon: "bookmark.fill",
-                style: .list
-            ) { showLibrary = true }
-
-            actionButton(
-                title: "Practice Solo",
-                subtitle: String(localized: "Rehearse with the ring and metronome"),
-                icon: "metronome",
-                style: .list
-            ) { showPracticePicker = true }
-
-            actionButton(
-                title: "Import Song",
-                subtitle: String(localized: "Search by title — chords and lyrics from the web"),
-                icon: "arrow.down.doc.fill",
-                style: .list
-            ) { showSongImport = true }
-
-            actionButton(
-                title: "Host a Setlist",
-                subtitle: String(localized: "Play multiple songs in one session"),
-                icon: "list.bullet.rectangle",
-                style: .list
-            ) { showSetlistPicker = true }
+            homeHostButton(style: .list)
+            homeJoinButton(style: .list)
+            homeProgressionsButton(style: .list)
+            homeImportButton(style: .list)
+            homeMoreSection(style: .list)
         }
+    }
+
+    @ViewBuilder
+    private func homeMoreSection(style: HomeActionStyle) -> some View {
+        VStack(alignment: .leading, spacing: style == .list ? gridSpacing : 12) {
+            homeSectionHeader("More")
+
+            switch style {
+            case .card:
+                HStack(spacing: gridSpacing) {
+                    homePracticeButton(style: .compact)
+                    homeSetlistButton(style: .compact)
+                }
+            case .list, .compact:
+                VStack(spacing: gridSpacing) {
+                    homePracticeButton(style: .compact)
+                    homeSetlistButton(style: .compact)
+                }
+            }
+        }
+    }
+
+    private func homeHostButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Host a Session",
+            subtitle: String(localized: "Invite musicians — chord ring or live piano"),
+            icon: "music.mic",
+            style: style
+        ) { showHostSetup = true }
+    }
+
+    private func homeJoinButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Join a Session",
+            subtitle: String(localized: "Connect to a nearby host"),
+            icon: "person.2.wave.2",
+            style: style
+        ) {
+            viewModel.beginJoining()
+            showJoinList = true
+        }
+    }
+
+    private func homeProgressionsButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "My Progressions",
+            subtitle: progressionsSubtitle,
+            icon: "bookmark.fill",
+            style: style
+        ) { showLibrary = true }
+    }
+
+    private func homeImportButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Import Song",
+            subtitle: String(localized: "Search by title — chords and lyrics from the web"),
+            icon: "arrow.down.doc.fill",
+            style: style
+        ) { showSongImport = true }
+    }
+
+    private func homePracticeButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Practice Solo",
+            subtitle: String(localized: "Rehearse with the ring and metronome"),
+            icon: "metronome",
+            style: style
+        ) { showPracticePicker = true }
+    }
+
+    private func homeSetlistButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Host a Setlist",
+            subtitle: String(localized: "Play multiple songs in one session"),
+            icon: "list.bullet.rectangle",
+            style: style
+        ) { showSetlistPicker = true }
     }
 
     private func homeSectionHeader(_ title: LocalizedStringKey) -> some View {
@@ -352,6 +321,7 @@ struct HomeView: View {
     private enum HomeActionStyle {
         case list
         case card
+        case compact
     }
 
     private func actionButton(
@@ -368,19 +338,58 @@ struct HomeView: View {
                     listActionContent(title: title, subtitle: subtitle, icon: icon)
                 case .card:
                     cardActionContent(title: title, subtitle: subtitle, icon: icon)
+                case .compact:
+                    compactActionContent(title: title, subtitle: subtitle, icon: icon)
                 }
             }
             .foregroundStyle(AppTheme.textPrimary)
             .frame(maxWidth: .infinity, alignment: style == .list ? .leading : .center)
-            .padding(style == .list ? 20 : 22)
-            .background(AppTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(padding(for: style))
+            .background(AppTheme.surface.opacity(style == .compact ? 0.72 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius(for: style), style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: cornerRadius(for: style), style: .continuous)
+                    .stroke(Color.white.opacity(style == .compact ? 0.05 : 0.08), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func padding(for style: HomeActionStyle) -> CGFloat {
+        switch style {
+        case .list: 20
+        case .card: 22
+        case .compact: 14
+        }
+    }
+
+    private func cornerRadius(for style: HomeActionStyle) -> CGFloat {
+        style == .compact ? 14 : 20
+    }
+
+    private func compactActionContent(title: LocalizedStringKey, subtitle: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppTheme.accentSecondary)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(AppTheme.textSecondary.opacity(0.7))
+        }
     }
 
     private func listActionContent(title: LocalizedStringKey, subtitle: String, icon: String) -> some View {
