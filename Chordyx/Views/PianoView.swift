@@ -12,11 +12,26 @@ struct PianoView: View {
 
     @AppStorage("guestViewInstrument") private var guestInstrumentRaw = ViewInstrument.piano.rawValue
     @AppStorage("guestBassStrings") private var guestBassStrings = 4
+    @AppStorage(GuestDisplaySettings.beginnerPianoTriadsKey) private var beginnerPianoTriads = false
 
     private var isHost: Bool { viewModel.role == .host }
     private var preferFlats: Bool { viewModel.payload.key.prefersFlats }
+
+    /// Guests can simplify host MIDI voicings to maj/min triads locally without changing the session.
+    private var usesBeginnerPianoTriads: Bool {
+        !isHost && beginnerPianoTriads
+    }
+
     private var activeNotes: [Int] {
-        viewModel.payload.pianoNotes.map { PianoNote.normalizeToInternal($0) }
+        let raw = viewModel.payload.pianoNotes.map { PianoNote.normalizeToInternal($0) }
+        guard usesBeginnerPianoTriads,
+              let simplified = ChordTheory.beginnerTriadNotes(
+                from: raw,
+                symbol: viewModel.payload.liveChordSymbol
+              ) else {
+            return raw
+        }
+        return simplified
     }
 
     private var activeNoteSet: Set<Int> { Set(activeNotes) }
@@ -170,6 +185,20 @@ struct PianoView: View {
                 ]
             )
 
+            if guestInstrument == .piano {
+                Toggle(isOn: $beginnerPianoTriads) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Beginner triads"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(String(localized: "Show only major/minor triads from the host (Cmaj9 → C)"))
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                .tint(AppTheme.accent)
+                .padding(.horizontal, 4)
+            }
+
             if guestGroup == "guitar" {
                 PlatformSegmentedPicker(
                     "Type",
@@ -310,8 +339,16 @@ struct PianoView: View {
             preferFlats: preferFlats
         ) ?? sorted.first.map { viewModel.singleNoteSymbol(for: $0) }
         // Prefer the stabilized session chord so brief finger lifts don't chop the label.
-        let recognized = viewModel.payload.liveChordSymbol ?? recognizedFromKeys
-        let chordName = recognized.map { symbol in
+        let hostSymbol = viewModel.payload.liveChordSymbol ?? recognizedFromKeys
+        let displaySymbol: String? = {
+            guard let hostSymbol else { return nil }
+            if usesBeginnerPianoTriads,
+               let simple = ChordTheory.beginnerTriadSymbol(for: hostSymbol, preferFlats: preferFlats) {
+                return simple
+            }
+            return hostSymbol
+        }()
+        let chordName = displaySymbol.map { symbol in
             switch notation {
             case .latin: ChordCatalog.latinName(forSymbol: symbol)
             case .nashville:

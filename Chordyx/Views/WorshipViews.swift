@@ -541,6 +541,7 @@ struct GuestMusicianSettingsView: View {
     @State private var beatHints = GuestDisplaySettings.beatSyncHintsEnabled
     @State private var acousticRoom = GuestDisplaySettings.acousticRoomMode
     @State private var stageMonitor = GuestDisplaySettings.stageMonitorMode
+    @State private var beginnerPianoTriads = GuestDisplaySettings.beginnerPianoTriadsEnabled
     @State private var haptics = GuestDisplaySettings.watchHapticsEnabled
     @State private var liveActivity = GuestDisplaySettings.liveActivityEnabled
     @State private var hideSongTitle = GuestDisplaySettings.hideSongTitleOnLockScreen
@@ -568,6 +569,10 @@ struct GuestMusicianSettingsView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Section("Stage Tools") {
+                    Toggle(String(localized: "Beginner piano triads"), isOn: $beginnerPianoTriads)
+                    Text(String(localized: "On piano view, show only major/minor triads from the host MIDI (Cmaj9 → C, Cm9 → Cm)."))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
                     Toggle("Stage Monitor (minimal view)", isOn: $stageMonitor)
                     Toggle("Scale hints for soloing", isOn: $scaleHints)
                     Toggle("Beat-sync change hints", isOn: $beatHints)
@@ -601,6 +606,7 @@ struct GuestMusicianSettingsView: View {
                         GuestDisplaySettings.beatSyncHintsEnabled = beatHints
                         GuestDisplaySettings.acousticRoomMode = acousticRoom
                         GuestDisplaySettings.stageMonitorMode = stageMonitor
+                        GuestDisplaySettings.beginnerPianoTriadsEnabled = beginnerPianoTriads
                         GuestDisplaySettings.watchHapticsEnabled = haptics
                         GuestDisplaySettings.liveActivityEnabled = liveActivity
                         GuestDisplaySettings.hideSongTitleOnLockScreen = hideSongTitle

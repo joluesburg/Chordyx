@@ -10765,6 +10765,70 @@
           }
         }
       }
+    },
+    "Beginner triads": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beginner triads"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tríadas para principiantes"
+          }
+        }
+      }
+    },
+    "Show only major/minor triads from the host (Cmaj9 → C)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show only major/minor triads from the host (Cmaj9 → C)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo muestra tríadas mayores/menores del host (Cmaj9 → C)"
+          }
+        }
+      }
+    },
+    "Beginner piano triads": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beginner piano triads"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tríadas de piano para principiantes"
+          }
+        }
+      }
+    },
+    "On piano view, show only major/minor triads from the host MIDI (Cmaj9 → C, Cm9 → Cm).": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On piano view, show only major/minor triads from the host MIDI (Cmaj9 → C, Cm9 → Cm)."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En la vista de piano, solo muestra tríadas mayores/menores del MIDI del host (Cmaj9 → C, Cm9 → Cm)."
+          }
+        }
+      }
     }
   },
   "version": "1.1"

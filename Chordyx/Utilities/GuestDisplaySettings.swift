@@ -17,6 +17,7 @@ enum GuestDisplaySettings {
     static let beatSyncHintsKey = "guestBeatSyncHintsEnabled"
     static let acousticRoomModeKey = "guestAcousticRoomMode"
     static let stageMonitorKey = "guestStageMonitorMode"
+    static let beginnerPianoTriadsKey = "guestBeginnerPianoTriads"
     static let externalDisplayGuideKey = "externalDisplayGuideDismissed"
     static let lyricsAutoScrollKey = "lyricsAutoScrollEnabled"
     static let preServiceDismissedTokenKey = "preServiceChecklistDismissedToken"
@@ -66,6 +67,12 @@ enum GuestDisplaySettings {
     static var stageMonitorMode: Bool {
         get { UserDefaults.standard.bool(forKey: stageMonitorKey) }
         set { UserDefaults.standard.set(newValue, forKey: stageMonitorKey) }
+    }
+
+    /// Guest-only piano: show major/minor triads instead of full host voicings (e.g. Cmaj9 → C–E–G).
+    static var beginnerPianoTriadsEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: beginnerPianoTriadsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: beginnerPianoTriadsKey) }
     }
 
     static var externalDisplayGuideDismissed: Bool {

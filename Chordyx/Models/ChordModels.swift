@@ -833,6 +833,64 @@ enum ChordTheory {
         let pcs = intervals(forSuffix: suffix).map { ((rootPC + $0) % 12 + 12) % 12 }
         return (rootPC, Set(pcs))
     }
+
+    /// Guest beginner piano: collapse extended chords to a major or minor triad only.
+    /// Returns `nil` for sus / dim / aug / power / unparseable symbols (show host notes unchanged).
+    static func beginnerMajorMinorTriad(
+        for symbol: String
+    ) -> (root: Int, isMinor: Bool)? {
+        let base = symbol.split(separator: "/").first.map(String.init) ?? symbol
+        guard let (root, suffix) = Transposer.parse(base),
+              let rootPC = Transposer.pitchClass(ofRoot: root),
+              let isMinor = beginnerIsMinorTriad(suffix: suffix) else { return nil }
+        return (rootPC, isMinor)
+    }
+
+    /// Simplified label for beginners — e.g. `Cmaj9` → `C`, `Cm9` → `Cm`.
+    static func beginnerTriadSymbol(for symbol: String, preferFlats: Bool) -> String? {
+        guard let triad = beginnerMajorMinorTriad(for: symbol) else { return nil }
+        let rootName = (preferFlats ? Transposer.flatNames : Transposer.sharpNames)[triad.root]
+        return triad.isMinor ? rootName + "m" : rootName
+    }
+
+    /// Piano keys to highlight for a beginner: root–3–5 near the host's hand.
+    static func beginnerTriadNotes(
+        from hostNotes: [Int],
+        symbol: String?
+    ) -> [Int]? {
+        guard let symbol,
+              let triad = beginnerMajorMinorTriad(for: symbol) else { return nil }
+
+        let thirdInterval = triad.isMinor ? 3 : 4
+        let anchor = hostNotes.min() ?? PianoNote.middleC
+        let rootNote = nearestKeyboardNote(pitchClass: triad.root, near: anchor)
+        let candidates = [rootNote, rootNote + thirdInterval, rootNote + 7]
+            .filter { PianoNote.keyboardRange.contains($0) }
+        return candidates.isEmpty ? nil : candidates
+    }
+
+    /// `true` = minor triad family, `false` = major/dominant family, `nil` = not a maj/min teaching triad.
+    private static func beginnerIsMinorTriad(suffix: String) -> Bool? {
+        let s = suffix.lowercased()
+        if s.contains("sus") { return nil }
+        if s.contains("dim") || s.contains("°") || s.contains("ø") || s.contains("m7b5") { return nil }
+        if s.hasPrefix("aug") || s.hasPrefix("+") { return nil }
+        if s == "5" { return nil }
+
+        let isMinor = (s.hasPrefix("m") && !s.hasPrefix("maj")) || s.hasPrefix("min")
+        return isMinor
+    }
+
+    private static func nearestKeyboardNote(pitchClass: Int, near target: Int) -> Int {
+        let pc = ((pitchClass % 12) + 12) % 12
+        let base = target - ((target % 12 - pc + 12) % 12)
+        let options = [base - 12, base, base + 12]
+            .filter { PianoNote.keyboardRange.contains($0) }
+        return options.min(by: { abs($0 - target) < abs($1 - target) }) ?? max(
+            PianoNote.keyboardRange.lowerBound,
+            min(PianoNote.keyboardRange.upperBound, base)
+        )
+    }
 }
 
 /// Normalizes live-played chord symbols so duplicates and inversions collapse to one bubble.
