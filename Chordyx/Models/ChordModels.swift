@@ -1233,6 +1233,10 @@ enum PianoNote {
     /// Dual-row upper board: C3 (36) … C8 (96).
     static let upperKeyboardRange = 36...96
 
+    /// Minimum gap (semitones) to treat as a hand break (perfect fifth).
+    /// Smaller gaps fall back to the classic C3 split so close-position chords stay together.
+    private static let handGapThreshold = 7
+
     /// MIDI note numbers for the 88-key span (A0=21 … C8=108).
     static let keyboardMIDIRange = 21...108
 
@@ -1248,6 +1252,85 @@ enum PianoNote {
 
     /// Preferred white-key width when scrolling a partial viewport.
     static let preferredWhiteKeyWidth: CGFloat = 46
+
+    /// Musical left / right-hand division for dual piano boards.
+    /// Keeps bass octaves (Do–Do) on the left board instead of leaving a lonely bass note.
+    struct HandDivision: Equatable, Sendable {
+        let leftNotes: [Int]
+        let rightNotes: [Int]
+        /// Keys shown on the lower (LH) board.
+        let lowerRange: ClosedRange<Int>
+        /// Keys shown on the upper (RH) board.
+        let upperRange: ClosedRange<Int>
+
+        var usesBothHands: Bool { !leftNotes.isEmpty && !rightNotes.isEmpty }
+
+        var leftScrollTarget: Int { leftNotes.min() ?? PianoNote.lowerMiddleC }
+        var rightScrollTarget: Int { rightNotes.min() ?? PianoNote.middleC }
+    }
+
+    /// Split a live voicing into LH / RH for dual-board display.
+    /// Example: C2+C3+B3+D4+E4+G4 → LH octave C2–C3, RH B3–G4 (not a lonely C2).
+    static func handDivision(for notes: [Int]) -> HandDivision? {
+        let sorted = notes
+            .map { normalizeToInternal($0) }
+            .filter { keyboardRange.contains($0) }
+            .sorted()
+        guard sorted.count >= 2 else { return nil }
+
+        var bestSplitAfter: Int?
+        var bestGap = -1
+        for index in 0..<(sorted.count - 1) {
+            let low = sorted[index]
+            let high = sorted[index + 1]
+            let gap = high - low
+            // Never cut between octave doubles (same pitch class ~12 semitones apart).
+            if pitchClass(of: low) == pitchClass(of: high), (11...13).contains(gap) {
+                continue
+            }
+            if gap > bestGap {
+                bestGap = gap
+                bestSplitAfter = index
+            }
+        }
+
+        let left: [Int]
+        let right: [Int]
+        if let bestSplitAfter, bestGap >= handGapThreshold {
+            left = Array(sorted[0...bestSplitAfter])
+            right = Array(sorted[(bestSplitAfter + 1)...])
+        } else {
+            // Classic register split at C3 when the voicing is close-position.
+            let split = upperKeyboardRange.lowerBound
+            left = sorted.filter { $0 < split }
+            right = sorted.filter { $0 >= split }
+        }
+
+        guard !left.isEmpty, !right.isEmpty,
+              let leftMax = left.max(),
+              let rightMin = right.min(),
+              leftMax < rightMin else { return nil }
+
+        // Extend the bass board through the top LH note (e.g. include C3 with C2).
+        let lowerEnd = max(leftMax, min(lowerKeyboardRange.upperBound, rightMin - 1))
+        let lowerStart = lowerKeyboardRange.lowerBound
+        let lowerRange = lowerStart...min(lowerEnd, rightMin - 1)
+        let upperRange = (lowerRange.upperBound + 1)...upperKeyboardRange.upperBound
+        guard lowerRange.lowerBound <= lowerRange.upperBound,
+              upperRange.lowerBound <= upperRange.upperBound else { return nil }
+
+        return HandDivision(
+            leftNotes: left,
+            rightNotes: right,
+            lowerRange: lowerRange,
+            upperRange: upperRange
+        )
+    }
+
+    /// True when a voicing should use stacked LH/RH boards.
+    static func spansBothHands(_ notes: [Int]) -> Bool {
+        handDivision(for: notes)?.usesBothHands ?? false
+    }
 
     static func whiteKeyCount(in range: ClosedRange<Int>) -> Int {
         range.filter { !isBlack($0) }.count

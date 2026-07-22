@@ -225,3 +225,32 @@ struct TwoHandChordRecognitionTests {
     }
 }
 
+struct PianoHandDivisionTests {
+
+    @Test func cmaj9OctaveBassKeepsBothCsOnLeftHand() {
+        // C2 + C3 octave, RH upper structure B3–D4–E4–G4 (user Domaj9 voicing).
+        let notes = [24, 36, 47, 50, 52, 55]
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division?.leftNotes == [24, 36])
+        #expect(division?.rightNotes == [47, 50, 52, 55])
+        #expect(division?.lowerRange.contains(24) == true)
+        #expect(division?.lowerRange.contains(36) == true)
+        #expect(division?.upperRange.contains(36) == false)
+        #expect(division?.upperRange.contains(47) == true)
+    }
+
+    @Test func closePositionCTriadOverBassUsesClassicC3Split() {
+        // C2 + close C3–E3–G3 — C3 stays with the right-hand triad.
+        let notes = [24, 36, 40, 43]
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division?.leftNotes == [24])
+        #expect(division?.rightNotes == [36, 40, 43])
+        #expect(division?.lowerRange.upperBound == PianoNote.lowerKeyboardRange.upperBound)
+    }
+
+    @Test func spansBothHandsForOctavePlusUpperStructure() {
+        #expect(PianoNote.spansBothHands([24, 36, 47, 50, 52, 55]))
+        #expect(!PianoNote.spansBothHands([36, 40, 43]))
+    }
+}
+

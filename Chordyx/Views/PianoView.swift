@@ -13,7 +13,7 @@ struct PianoView: View {
     @AppStorage("guestViewInstrument") private var guestInstrumentRaw = ViewInstrument.piano.rawValue
     @AppStorage("guestBassStrings") private var guestBassStrings = 4
     @AppStorage(GuestDisplaySettings.beginnerPianoTriadsKey) private var beginnerPianoTriads = false
-    @State private var showGuestPianoControls = false
+    @State private var showGuestInstrumentControls = false
 
     private var isHost: Bool { viewModel.role == .host }
     private var preferFlats: Bool { viewModel.payload.key.prefersFlats }
@@ -59,15 +59,11 @@ struct PianoView: View {
 
     private var activeNoteSet: Set<Int> { Set(activeNotes) }
 
-    /// True when the live voicing uses both bass (below C3) and treble (C3+).
-    /// Prefer raw host notes so guest highlight rebuilds (treble-only) don't hide the dual boards.
+    /// True when the live voicing needs stacked LH / RH boards (musical hand split).
+    /// Prefer raw host notes so guest highlight rebuilds don't hide the dual boards.
     private var activeNotesSpanBothHands: Bool {
-        let split = PianoNote.upperKeyboardRange.lowerBound
         let source = hostRawPianoNotes.isEmpty ? activeNotes : hostRawPianoNotes
-        let notes = Set(source)
-        let hasBass = notes.contains { $0 < split }
-        let hasTreble = notes.contains { $0 >= split }
-        return hasBass && hasTreble
+        return PianoNote.spansBothHands(source)
     }
 
     // Guests render on the host's piano by default, but can switch locally.
@@ -124,6 +120,11 @@ struct PianoView: View {
         #endif
     }
 
+    /// Guest guitar/bass: full stable fretboard + chord orb (no reflow when chords change).
+    private var usesImmersiveGuestFretboard: Bool {
+        !isHost && guestInstrument != .piano
+    }
+
     /// Classic board heights — dual-row stacks C3+ over A0–B2 without stretching keys tall.
     private var instrumentBoardHeight: CGFloat {
         let dualRowHeight: CGFloat = isCompactHeight ? 216 : 308
@@ -132,26 +133,20 @@ struct PianoView: View {
         #if os(macOS)
         return 200
         #else
-        if usesImmersiveGuestPiano { return dualRowHeight }
+        if usesImmersiveGuestPiano { return 200 }
         return showsFullPianoKeyboard ? 280 : 308
         #endif
     }
 
-    /// Stack both boards whenever both hands are sounding, or for immersive guest piano (full two-hand view).
+    /// Same as Mac: two boards only when bass + treble sound together (chord won't fit one keyboard).
     private var shouldShowDualPianoRows: Bool {
-        if activeNotesSpanBothHands { return true }
-        #if os(macOS)
-        return false
-        #else
-        // Guest piano on iPhone: always keep both boards ready (same key size, scroll per row).
-        return usesImmersiveGuestPiano
-        #endif
+        activeNotesSpanBothHands
     }
 
     private var forceDualPianoRows: Bool { shouldShowDualPianoRows }
 
     private var chordLabelSize: CGFloat {
-        if usesImmersiveGuestPiano || isCompactHeight { return 28 }
+        if usesImmersiveGuestPiano || usesImmersiveGuestFretboard || isCompactHeight { return 28 }
         if PlatformDevice.isPhone { return 34 }
         return 44
     }
@@ -160,7 +155,7 @@ struct PianoView: View {
         #if os(macOS)
         8
         #else
-        usesImmersiveGuestPiano ? 8 : (showsFullPianoKeyboard ? 16 : 12)
+        usesImmersiveGuestPiano || usesImmersiveGuestFretboard ? 8 : (showsFullPianoKeyboard ? 16 : 12)
         #endif
     }
 
@@ -170,6 +165,8 @@ struct PianoView: View {
 
             if usesImmersiveGuestPiano {
                 immersiveGuestPianoBody
+            } else if usesImmersiveGuestFretboard {
+                immersiveGuestFretboardBody
             } else {
                 standardPianoBody
             }
@@ -180,9 +177,9 @@ struct PianoView: View {
     /// Full-bleed guest piano: keyboards dominate; chord sits in a non-blocking orb.
     private var immersiveGuestPianoBody: some View {
         VStack(spacing: 10) {
-            immersiveTopBar
+            immersiveGuestTopBar(optionsAccessibilityLabel: String(localized: "Instrument options"))
 
-            if showGuestPianoControls {
+            if showGuestInstrumentControls {
                 guestInstrumentPicker
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -200,6 +197,29 @@ struct PianoView: View {
         .padding(.horizontal, keyboardHorizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Full-bleed guest guitar/bass: fretboard fills the view; chord orb stays in the top bar.
+    private var immersiveGuestFretboardBody: some View {
+        VStack(spacing: 10) {
+            immersiveGuestTopBar(optionsAccessibilityLabel: String(localized: "Instrument options"))
+
+            if showGuestInstrumentControls {
+                guestInstrumentPicker
+                    .padding(.horizontal, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Stable full-view board — height does not jump when the host changes chords.
+            instrumentBoard
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+        }
+        .padding(.horizontal, keyboardHorizontalPadding)
+        .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -235,25 +255,29 @@ struct PianoView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var immersiveTopBar: some View {
+    private func immersiveGuestTopBar(optionsAccessibilityLabel: String) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    showGuestPianoControls.toggle()
+                    showGuestInstrumentControls.toggle()
                 }
             } label: {
-                Image(systemName: showGuestPianoControls ? "chevron.up.circle.fill" : "slider.horizontal.3")
+                Image(systemName: showGuestInstrumentControls ? "chevron.up.circle.fill" : "slider.horizontal.3")
                     .font(.title3)
                     .foregroundStyle(AppTheme.textSecondary)
             }
-            .accessibilityLabel(String(localized: "Piano options"))
+            .accessibilityLabel(optionsAccessibilityLabel)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.payload.sessionName)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.textSecondary)
                     .lineLimit(1)
-                if usesBeginnerPianoTriads {
+                Text(guestInstrumentShortLabel)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.accentSecondary)
+                    .lineLimit(1)
+                if usesBeginnerPianoTriads, guestInstrument == .piano {
                     Text(String(localized: "Beginner"))
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(AppTheme.accentSecondary)
@@ -268,6 +292,16 @@ struct PianoView: View {
             overlayHeaderActions
         }
         .padding(.horizontal, 4)
+    }
+
+    private var guestInstrumentShortLabel: String {
+        switch guestInstrument {
+        case .piano: String(localized: "Piano")
+        case .acoustic: String(localized: "Acoustic")
+        case .electric: String(localized: "Electric")
+        case .bass:
+            String(format: String(localized: "Bass · %lld strings"), guestBassStrings)
+        }
     }
 
     @ViewBuilder
@@ -638,25 +672,27 @@ private struct AdaptivePianoBoard: View {
         layoutNotes.isEmpty ? activeNotes : layoutNotes
     }
 
-    /// Live notes use both the lower (A0–B2) and upper (C3–C8) boards.
+    /// Live notes need both hands (musical split — keeps bass octaves on the lower board).
     private var notesSpanBothHands: Bool {
-        let split = PianoNote.upperKeyboardRange.lowerBound
-        let hasBass = notesForLayout.contains { $0 < split }
-        let hasTreble = notesForLayout.contains { $0 >= split }
-        return hasBass && hasTreble
+        PianoNote.spansBothHands(Array(notesForLayout))
+    }
+
+    private var handDivision: PianoNote.HandDivision? {
+        PianoNote.handDivision(for: Array(notesForLayout))
     }
 
     private func layout(for width: CGFloat) -> Layout {
-        // Both hands / forced dual first — even in iPhone landscape (compact height).
+        // Dual boards only when bass + treble sound together (same rule on Mac and iPhone).
         if forceDualRow || notesSpanBothHands { return .dualRow }
-        if isCompactHeight { return .scrollSingle }
         #if os(macOS)
         return .scrollSingle
         #else
-        if PianoNote.canFitComfortably(range: PianoNote.keyboardRange, in: width) {
+        // One scrolling keyboard otherwise — do not dual-row just because 88 keys are wide.
+        if !isCompactHeight,
+           PianoNote.canFitComfortably(range: PianoNote.keyboardRange, in: width) {
             return .fittedSingle
         }
-        return .dualRow
+        return .scrollSingle
         #endif
     }
 
@@ -678,17 +714,23 @@ private struct AdaptivePianoBoard: View {
 
             case .dualRow:
                 // Same key size on both boards — always scroll at preferred width (never stretch-to-fit).
+                // Ranges follow the musical LH/RH split (octave Do–Do stays on the lower board).
                 let rowHeight: CGFloat = isCompactHeight ? 104 : 150
+                let division = handDivision
+                let upperRange = division?.upperRange ?? PianoNote.upperKeyboardRange
+                let lowerRange = division?.lowerRange ?? PianoNote.lowerKeyboardRange
+                let upperScroll = division?.rightScrollTarget ?? PianoNote.middleC
+                let lowerScroll = division?.leftScrollTarget ?? PianoNote.lowerMiddleC
                 VStack(spacing: 8) {
                     dualRowKeyboard(
-                        range: PianoNote.upperKeyboardRange,
-                        defaultScrollTarget: PianoNote.middleC,
+                        range: upperRange,
+                        defaultScrollTarget: upperScroll,
                         width: geo.size.width,
                         height: rowHeight
                     )
                     dualRowKeyboard(
-                        range: PianoNote.lowerKeyboardRange,
-                        defaultScrollTarget: PianoNote.lowerMiddleC,
+                        range: lowerRange,
+                        defaultScrollTarget: lowerScroll,
                         width: geo.size.width,
                         height: rowHeight
                     )
@@ -699,7 +741,7 @@ private struct AdaptivePianoBoard: View {
                 #if os(macOS)
                 let keyHeight = min(geo.size.height, 200)
                 #else
-                let keyHeight = min(geo.size.height, 150)
+                let keyHeight = min(geo.size.height, isCompactHeight ? 150 : 200)
                 #endif
                 ScrollablePianoKeyboard(
                     activeNotes: activeNotes,
