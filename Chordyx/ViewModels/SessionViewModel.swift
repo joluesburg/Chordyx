@@ -1016,7 +1016,12 @@ final class SessionViewModel {
         refreshLibraryKeyHints(from: libraryStore)
         if payload.autoDetectKey {
             startPeriodicKeyReviewIfNeeded()
-            refreshAudioKeyAssistPolicy()
+            // Defer mic — SessionView appear often coincides with Host Setup dismiss.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard self.isInSession, self.payload.autoDetectKey else { return }
+                self.refreshAudioKeyAssistPolicy()
+            }
         }
     }
 
@@ -1385,7 +1390,12 @@ final class SessionViewModel {
         activateSessionBackgroundServices()
         if autoDetectKey {
             startPeriodicKeyReviewIfNeeded()
-            refreshAudioKeyAssistPolicy()
+            // Defer mic open until session UI is up — avoids AVAudio + view-transition races.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard self.isInSession, self.payload.autoDetectKey else { return }
+                self.refreshAudioKeyAssistPolicy()
+            }
         }
     }
 
@@ -1423,7 +1433,11 @@ final class SessionViewModel {
         activateSessionBackgroundServices()
         if autoDetectKey {
             startPeriodicKeyReviewIfNeeded()
-            refreshAudioKeyAssistPolicy()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard self.isInSession, self.payload.autoDetectKey else { return }
+                self.refreshAudioKeyAssistPolicy()
+            }
         }
     }
 

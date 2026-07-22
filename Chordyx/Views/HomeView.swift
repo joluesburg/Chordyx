@@ -94,7 +94,13 @@ struct HomeView: View {
                 recentSessionRecords = RecentSessionStore.records
             }
             .onChange(of: viewModel.isInSession) { _, inSession in
-                if !inSession {
+                if inSession {
+                    // Ensure Host/Join covers are closed before the session cover presents (Mac sheets).
+                    showHostSetup = false
+                    showJoinList = false
+                    showPracticePicker = false
+                    showSetlistPicker = false
+                } else {
                     recentSessionRecords = RecentSessionStore.records
                 }
             }
@@ -478,7 +484,7 @@ struct HostSetupView: View {
                     }
 
                     Section("Session") {
-                        TextField("Session name", text: $sessionName)
+                        TextField(L10n.jamSession, text: $sessionName)
                         Toggle("Approve guests before joining", isOn: $requireHostApproval)
                     }
 
@@ -552,25 +558,35 @@ struct HostSetupView: View {
         let autoDetectKey = keySelectionMode == .auto
         // Auto AI: don't lock a manual chart key — start neutral (C) until detection from playing.
         let key = autoDetectKey ? MusicalKey.C : selectedKey
+        let kind = sessionKind
+        let notation = selectedNotation
+        let mode = performanceMode
 
-        switch sessionKind {
-        case .progression:
-            viewModel.hostSession(
-                name: name.isEmpty ? L10n.jamSession : name,
-                key: key,
-                notation: selectedNotation,
-                performanceMode: performanceMode,
-                autoDetectKey: autoDetectKey
-            )
-        case .liveChords:
-            viewModel.hostLiveChordsSession(
-                name: name.isEmpty ? String(localized: "Live Chords") : name,
-                key: key,
-                notation: selectedNotation,
-                autoDetectKey: autoDetectKey
-            )
-        }
+        // Dismiss Host Setup first. Starting the session (isInSession = true) before dismiss
+        // tears down covers while animating out → crash.
         dismiss()
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            let resolvedName = name.isEmpty ? L10n.jamSession : name
+            switch kind {
+            case .progression:
+                viewModel.hostSession(
+                    name: resolvedName,
+                    key: key,
+                    notation: notation,
+                    performanceMode: mode,
+                    autoDetectKey: autoDetectKey
+                )
+            case .liveChords:
+                viewModel.hostLiveChordsSession(
+                    name: resolvedName,
+                    key: key,
+                    notation: notation,
+                    autoDetectKey: autoDetectKey
+                )
+            }
+        }
     }
 }
 
