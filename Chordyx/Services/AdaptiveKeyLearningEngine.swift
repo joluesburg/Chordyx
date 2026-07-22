@@ -25,7 +25,7 @@ struct AdaptiveKeyDetection: Equatable, Sendable {
 final class AdaptiveKeyLearningEngine {
     static let shared = AdaptiveKeyLearningEngine()
 
-    private static let storeFileName = "adaptive_key_learning.json"
+    nonisolated private static let storeFileName = "adaptive_key_learning.json"
     private static let minimumSymbols = 3
 
     private var memory: [KeyMemoryEntry] = []
@@ -329,6 +329,7 @@ final class AdaptiveKeyLearningEngine {
         guard cloudStoreURL == nil, !isResolvingCloudStore else { return }
         isResolvingCloudStore = true
         let local = localStoreURL
+        let fileName = Self.storeFileName
         Task.detached(priority: .utility) {
             // Apple: do not call ubiquity container APIs on the main thread.
             let cloudRoot = FileManager.default.url(forUbiquityContainerIdentifier: nil)
@@ -338,7 +339,7 @@ final class AdaptiveKeyLearningEngine {
                     .appendingPathComponent("Documents", isDirectory: true)
                     .appendingPathComponent("Chordyx", isDirectory: true)
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                return dir.appendingPathComponent(Self.storeFileName)
+                return dir.appendingPathComponent(fileName)
             }()
 
             if let cloudURL,

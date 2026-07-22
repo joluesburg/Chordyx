@@ -27,7 +27,8 @@ final class ProgressionStore {
     }
 
     private static let iCloudKey = "iCloudBackupEnabled"
-    private static let iCloudContainerID = "iCloud.Espinosa.Chordyx"
+    /// Constant container id — safe to read from background ubiquity lookups.
+    nonisolated private static let iCloudContainerID = "iCloud.Espinosa.Chordyx"
     private let fileURL: URL
     private let setlistFileURL: URL
     private let pdfDirectory: URL
@@ -431,13 +432,12 @@ final class ProgressionStore {
     /// Resolves the iCloud container off the critical launch path, then reloads local UI state.
     private func importFromCloudInBackground() async {
         guard iCloudBackupEnabled else { return }
-        let progressionsURL = await Task.detached(priority: .utility) { () -> URL? in
-            FileManager.default.url(forUbiquityContainerIdentifier: Self.iCloudContainerID)?
-                .appendingPathComponent("Documents/saved_progressions.json")
-        }.value
-        let setlistsURL = await Task.detached(priority: .utility) { () -> URL? in
-            FileManager.default.url(forUbiquityContainerIdentifier: Self.iCloudContainerID)?
-                .appendingPathComponent("Documents/setlists.json")
+        let containerID = Self.iCloudContainerID
+        let (progressionsURL, setlistsURL) = await Task.detached(priority: .utility) {
+            let root = FileManager.default.url(forUbiquityContainerIdentifier: containerID)
+            let progressions = root?.appendingPathComponent("Documents/saved_progressions.json")
+            let setlists = root?.appendingPathComponent("Documents/setlists.json")
+            return (progressions, setlists)
         }.value
 
         if let progressionsURL, FileManager.default.fileExists(atPath: progressionsURL.path),
