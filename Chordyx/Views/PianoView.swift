@@ -61,9 +61,19 @@ struct PianoView: View {
 
     /// True when the live voicing needs stacked LH / RH boards (musical hand split).
     /// Prefer raw host notes so guest highlight rebuilds don't hide the dual boards.
+    /// Beginner triads always use one keyboard with just the triad.
     private var activeNotesSpanBothHands: Bool {
+        if usesBeginnerPianoTriads { return false }
         let source = hostRawPianoNotes.isEmpty ? activeNotes : hostRawPianoNotes
         return PianoNote.spansBothHands(source)
+    }
+
+    /// Notes that drive dual / lower-only layout. Beginner mode follows the simplified triad.
+    private var pianoLayoutNotes: Set<Int> {
+        if usesBeginnerPianoTriads {
+            return activeNoteSet
+        }
+        return Set(hostRawPianoNotes.isEmpty ? activeNotes : hostRawPianoNotes)
     }
 
     // Guests render on the host's piano by default, but can switch locally.
@@ -125,10 +135,11 @@ struct PianoView: View {
         !isHost && guestInstrument != .piano
     }
 
-    /// Classic board heights — dual-row stacks C3+ over A0–B2 without stretching keys tall.
+    /// Classic board heights — dual-row stacks RH over LH without stretching keys tall.
     private var instrumentBoardHeight: CGFloat {
-        let dualRowHeight: CGFloat = isCompactHeight ? 216 : 308
+        let dualRowHeight: CGFloat = isCompactHeight ? 232 : 324
         if shouldShowDualPianoRows { return dualRowHeight }
+        if usesLowerBoardOnly { return isCompactHeight ? 120 : 160 }
         if isCompactHeight { return 150 }
         #if os(macOS)
         return 200
@@ -139,8 +150,15 @@ struct PianoView: View {
     }
 
     /// Same as Mac: two boards only when bass + treble sound together (chord won't fit one keyboard).
+    /// Beginner guests always get a single triad keyboard.
     private var shouldShowDualPianoRows: Bool {
-        activeNotesSpanBothHands
+        !usesBeginnerPianoTriads && activeNotesSpanBothHands
+    }
+
+    private var usesLowerBoardOnly: Bool {
+        !usesBeginnerPianoTriads
+            && !shouldShowDualPianoRows
+            && PianoNote.lowerBoardOnly(for: Array(pianoLayoutNotes)) != nil
     }
 
     private var forceDualPianoRows: Bool { shouldShowDualPianoRows }
@@ -318,7 +336,7 @@ struct PianoView: View {
         } else {
             AdaptivePianoBoard(
                 activeNotes: activeNoteSet,
-                layoutNotes: Set(hostRawPianoNotes.isEmpty ? activeNotes : hostRawPianoNotes),
+                layoutNotes: pianoLayoutNotes,
                 preferFlats: preferFlats,
                 isInteractive: isHost,
                 isCompactHeight: isCompactHeight,
@@ -649,7 +667,7 @@ struct PianoView: View {
 }
 
 /// Chooses the most usable piano layout for the available width:
-/// 1) Stack C3+ above A0–B2 when both hands are needed (same key size on both boards)
+/// 1) Stack right-hand above left-hand when both hands are needed
 /// 2) Fit all 88 keys in one row when keys stay comfortable
 /// 3) Otherwise a single scrolling row
 private struct AdaptivePianoBoard: View {
@@ -665,6 +683,7 @@ private struct AdaptivePianoBoard: View {
     private enum Layout {
         case fittedSingle
         case dualRow
+        case lowerOnly
         case scrollSingle
     }
 
@@ -681,9 +700,15 @@ private struct AdaptivePianoBoard: View {
         PianoNote.handDivision(for: Array(notesForLayout))
     }
 
+    private var lowerOnlyDivision: PianoNote.HandDivision? {
+        PianoNote.lowerBoardOnly(for: Array(notesForLayout))
+    }
+
     private func layout(for width: CGFloat) -> Layout {
         // Dual boards only when bass + treble sound together (same rule on Mac and iPhone).
         if forceDualRow || notesSpanBothHands { return .dualRow }
+        // Sol2+Sol3 (and similar LH octaves): one extended bass board, not split across C3.
+        if lowerOnlyDivision != nil { return .lowerOnly }
         #if os(macOS)
         return .scrollSingle
         #else
@@ -715,27 +740,70 @@ private struct AdaptivePianoBoard: View {
             case .dualRow:
                 // Same key size on both boards — always scroll at preferred width (never stretch-to-fit).
                 // Ranges follow the musical LH/RH split (octave Do–Do stays on the lower board).
-                let rowHeight: CGFloat = isCompactHeight ? 104 : 150
+                let labelHeight: CGFloat = isCompactHeight ? 14 : 16
+                let rowHeight: CGFloat = isCompactHeight ? 96 : 138
                 let division = handDivision
                 let upperRange = division?.upperRange ?? PianoNote.upperKeyboardRange
                 let lowerRange = division?.lowerRange ?? PianoNote.lowerKeyboardRange
                 let upperScroll = division?.rightScrollTarget ?? PianoNote.middleC
                 let lowerScroll = division?.leftScrollTarget ?? PianoNote.lowerMiddleC
-                VStack(spacing: 8) {
-                    dualRowKeyboard(
+                let rightActive: Set<Int> = {
+                    let hand = Set(division?.rightNotes ?? [])
+                    let lit = hand.isEmpty ? activeNotes.filter { upperRange.contains($0) } : hand.intersection(activeNotes)
+                    return Set(lit)
+                }()
+                let leftActive: Set<Int> = {
+                    let hand = Set(division?.leftNotes ?? [])
+                    let lit = hand.isEmpty ? activeNotes.filter { lowerRange.contains($0) } : hand.intersection(activeNotes)
+                    return Set(lit)
+                }()
+                VStack(spacing: 6) {
+                    handBoardSection(
+                        title: String(localized: "Right hand"),
+                        active: rightActive,
                         range: upperRange,
-                        defaultScrollTarget: upperScroll,
+                        scrollTarget: upperScroll,
                         width: geo.size.width,
-                        height: rowHeight
+                        rowHeight: rowHeight,
+                        labelHeight: labelHeight
                     )
-                    dualRowKeyboard(
+                    handBoardSection(
+                        title: String(localized: "Left hand"),
+                        active: leftActive,
                         range: lowerRange,
-                        defaultScrollTarget: lowerScroll,
+                        scrollTarget: lowerScroll,
                         width: geo.size.width,
-                        height: rowHeight
+                        rowHeight: rowHeight,
+                        labelHeight: labelHeight
                     )
                 }
-                .frame(width: geo.size.width, height: rowHeight * 2 + 8, alignment: .top)
+                .frame(
+                    width: geo.size.width,
+                    height: (rowHeight + labelHeight) * 2 + 6,
+                    alignment: .top
+                )
+
+            case .lowerOnly:
+                let labelHeight: CGFloat = isCompactHeight ? 14 : 16
+                let rowHeight: CGFloat = isCompactHeight ? 96 : 138
+                let division = lowerOnlyDivision
+                let range = division?.lowerRange ?? PianoNote.lowerKeyboardRange
+                let scroll = division?.leftScrollTarget ?? PianoNote.lowerMiddleC
+                let leftActive: Set<Int> = {
+                    let hand = Set(division?.leftNotes ?? [])
+                    let lit = hand.isEmpty ? activeNotes.filter { range.contains($0) } : hand.intersection(activeNotes)
+                    return Set(lit)
+                }()
+                handBoardSection(
+                    title: String(localized: "Left hand"),
+                    active: leftActive,
+                    range: range,
+                    scrollTarget: scroll,
+                    width: geo.size.width,
+                    rowHeight: rowHeight,
+                    labelHeight: labelHeight
+                )
+                .frame(width: geo.size.width, height: rowHeight + labelHeight, alignment: .top)
 
             case .scrollSingle:
                 #if os(macOS)
@@ -752,26 +820,35 @@ private struct AdaptivePianoBoard: View {
                 .frame(width: geo.size.width, height: keyHeight, alignment: .top)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: notesSpanBothHands || forceDualRow)
+        .animation(.easeInOut(duration: 0.2), value: notesSpanBothHands || forceDualRow || lowerOnlyDivision != nil)
     }
 
-    /// Dual boards always share `preferredWhiteKeyWidth` so upper/lower keys match.
-    private func dualRowKeyboard(
+    private func handBoardSection(
+        title: String,
+        active: Set<Int>,
         range: ClosedRange<Int>,
-        defaultScrollTarget: Int,
+        scrollTarget: Int,
         width: CGFloat,
-        height: CGFloat
+        rowHeight: CGFloat,
+        labelHeight: CGFloat
     ) -> some View {
-        ScrollablePianoKeyboard(
-            activeNotes: activeNotes,
-            preferFlats: preferFlats,
-            isInteractive: isInteractive,
-            noteRange: range,
-            defaultScrollTarget: defaultScrollTarget,
-            whiteKeyWidth: PianoNote.preferredWhiteKeyWidth,
-            onTap: onTap
-        )
-        .frame(width: width, height: height)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(height: labelHeight, alignment: .leading)
+                .padding(.leading, 2)
+            ScrollablePianoKeyboard(
+                activeNotes: active,
+                preferFlats: preferFlats,
+                isInteractive: isInteractive,
+                noteRange: range,
+                defaultScrollTarget: scrollTarget,
+                whiteKeyWidth: PianoNote.preferredWhiteKeyWidth,
+                onTap: onTap
+            )
+            .frame(width: width, height: rowHeight)
+        }
     }
 }
 

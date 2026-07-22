@@ -252,5 +252,50 @@ struct PianoHandDivisionTests {
         #expect(PianoNote.spansBothHands([24, 36, 47, 50, 52, 55]))
         #expect(!PianoNote.spansBothHands([36, 40, 43]))
     }
+
+    @Test func leftHandGOctaveStaysOnLowerBoardTogether() {
+        // Sol2 + Sol3 (31, 43) — must not light one G per board.
+        let notes = [31, 43]
+        #expect(!PianoNote.spansBothHands(notes))
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division?.leftNotes == [31, 43])
+        #expect(division?.rightNotes.isEmpty == true)
+        #expect(division?.lowerRange.contains(31) == true)
+        #expect(division?.lowerRange.contains(43) == true)
+        #expect(PianoNote.lowerBoardOnly(for: notes) != nil)
+    }
+
+    @Test func leftHandRootFifthRightHandTriad() {
+        // G2+D3 shell + B3–D4–G4 triad.
+        let notes = [31, 38, 47, 50, 55]
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division?.leftNotes == [31, 38])
+        #expect(division?.rightNotes == [47, 50, 55])
+        #expect(division?.usesBothHands == true)
+    }
+
+    @Test func am7LeftOctaveRightUpperStructure() {
+        // A1+A2 + C4–E4–G4
+        let notes = [21, 33, 48, 52, 55]
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division?.leftNotes == [21, 33])
+        #expect(division?.rightNotes == [48, 52, 55])
+    }
+
+    @Test func handRangesAreExclusive() {
+        let notes = [24, 36, 47, 50, 52, 55]
+        let division = PianoNote.handDivision(for: notes)
+        #expect(division != nil)
+        if let division {
+            for note in division.leftNotes {
+                #expect(division.lowerRange.contains(note))
+                #expect(!division.upperRange.contains(note))
+            }
+            for note in division.rightNotes {
+                #expect(division.upperRange.contains(note))
+                #expect(!division.lowerRange.contains(note))
+            }
+        }
+    }
 }
 

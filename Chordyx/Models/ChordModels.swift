@@ -1265,20 +1265,31 @@ enum PianoNote {
 
         var usesBothHands: Bool { !leftNotes.isEmpty && !rightNotes.isEmpty }
 
-        var leftScrollTarget: Int { leftNotes.min() ?? PianoNote.lowerMiddleC }
-        var rightScrollTarget: Int { rightNotes.min() ?? PianoNote.middleC }
+        var leftScrollTarget: Int {
+            let mid = ((leftNotes.min() ?? PianoNote.lowerMiddleC) + (leftNotes.max() ?? PianoNote.lowerMiddleC)) / 2
+            return mid
+        }
+
+        var rightScrollTarget: Int {
+            let mid = ((rightNotes.min() ?? PianoNote.middleC) + (rightNotes.max() ?? PianoNote.middleC)) / 2
+            return mid
+        }
     }
 
     /// Split a live voicing into LH / RH for dual-board display.
     /// Example: C2+C3+B3+D4+E4+G4 → LH octave C2–C3, RH B3–G4 (not a lonely C2).
     static func handDivision(for notes: [Int]) -> HandDivision? {
-        let sorted = notes
-            .map { normalizeToInternal($0) }
-            .filter { keyboardRange.contains($0) }
-            .sorted()
+        let sorted = Array(Set(notes.map { normalizeToInternal($0) }.filter { keyboardRange.contains($0) })).sorted()
         guard sorted.count >= 2 else { return nil }
 
+        // Pure octaves / unisons of one pitch class → one bass board.
+        let pitchClasses = Set(sorted.map { pitchClass(of: $0) })
+        if pitchClasses.count == 1 {
+            return lowerOnlyDivision(leftNotes: sorted)
+        }
+
         var bestSplitAfter: Int?
+        var bestScore = -Double.infinity
         var bestGap = -1
         for index in 0..<(sorted.count - 1) {
             let low = sorted[index]
@@ -1288,15 +1299,21 @@ enum PianoNote {
             if pitchClass(of: low) == pitchClass(of: high), (11...13).contains(gap) {
                 continue
             }
-            if gap > bestGap {
-                bestGap = gap
+
+            let left = Array(sorted[0...index])
+            let right = Array(sorted[(index + 1)...])
+            let score = handSplitScore(left: left, right: right, gap: gap)
+            if score > bestScore {
+                bestScore = score
                 bestSplitAfter = index
+                bestGap = gap
             }
         }
 
-        let left: [Int]
-        let right: [Int]
-        if let bestSplitAfter, bestGap >= handGapThreshold {
+        var left: [Int]
+        var right: [Int]
+        // Only trust a musical gap split when the break is a fifth or wider.
+        if let bestSplitAfter, bestGap >= handGapThreshold, bestScore >= 6 {
             left = Array(sorted[0...bestSplitAfter])
             right = Array(sorted[(bestSplitAfter + 1)...])
         } else {
@@ -1306,18 +1323,47 @@ enum PianoNote {
             right = sorted.filter { $0 >= split }
         }
 
-        guard !left.isEmpty, !right.isEmpty,
-              let leftMax = left.max(),
+        // If "right" only doubles pitch classes already in the left (octave twins), fold into LH.
+        if !left.isEmpty, !right.isEmpty {
+            let leftPCs = Set(left.map { pitchClass(of: $0) })
+            let rightPCs = Set(right.map { pitchClass(of: $0) })
+            if rightPCs.isSubset(of: leftPCs) {
+                return lowerOnlyDivision(leftNotes: sorted)
+            }
+        }
+
+        if right.isEmpty {
+            return lowerOnlyDivision(leftNotes: left)
+        }
+        if left.isEmpty {
+            // Treble-only cluster — single upper-oriented board via nil (scroll single).
+            return nil
+        }
+
+        guard let leftMax = left.max(),
               let rightMin = right.min(),
               leftMax < rightMin else { return nil }
 
-        // Extend the bass board through the top LH note (e.g. include C3 with C2).
-        let lowerEnd = max(leftMax, min(lowerKeyboardRange.upperBound, rightMin - 1))
-        let lowerStart = lowerKeyboardRange.lowerBound
-        let lowerRange = lowerStart...min(lowerEnd, rightMin - 1)
-        let upperRange = (lowerRange.upperBound + 1)...upperKeyboardRange.upperBound
+        // Exclusive board ranges: LH notes only on lower, RH only on upper.
+        let lowerEnd = min(max(leftMax, lowerKeyboardRange.upperBound), rightMin - 1)
+        let lowerRange = lowerKeyboardRange.lowerBound...lowerEnd
+        let upperStart = lowerRange.upperBound + 1
+        let upperRange = upperStart...upperKeyboardRange.upperBound
         guard lowerRange.lowerBound <= lowerRange.upperBound,
-              upperRange.lowerBound <= upperRange.upperBound else { return nil }
+              upperRange.lowerBound <= upperRange.upperBound,
+              left.allSatisfy({ lowerRange.contains($0) }),
+              right.allSatisfy({ upperRange.contains($0) }) else {
+            // Fallback: tight exclusive cut between hands.
+            let tightLower = lowerKeyboardRange.lowerBound...leftMax
+            let tightUpper = rightMin...upperKeyboardRange.upperBound
+            guard tightLower.upperBound < tightUpper.lowerBound else { return nil }
+            return HandDivision(
+                leftNotes: left,
+                rightNotes: right,
+                lowerRange: tightLower,
+                upperRange: tightUpper
+            )
+        }
 
         return HandDivision(
             leftNotes: left,
@@ -1327,9 +1373,74 @@ enum PianoNote {
         )
     }
 
+    private static func lowerOnlyDivision(leftNotes: [Int]) -> HandDivision? {
+        guard !leftNotes.isEmpty, let high = leftNotes.max() else { return nil }
+        let end = min(keyboardRange.upperBound, max(high, lowerKeyboardRange.upperBound))
+        return HandDivision(
+            leftNotes: leftNotes,
+            rightNotes: [],
+            lowerRange: lowerKeyboardRange.lowerBound...end,
+            upperRange: upperKeyboardRange
+        )
+    }
+
+    /// Higher is better. Rewards a clear gap, compact LH bass, and playable hand spans.
+    private static func handSplitScore(left: [Int], right: [Int], gap: Int) -> Double {
+        guard let leftMin = left.min(), let leftMax = left.max(),
+              let rightMin = right.min(), let rightMax = right.max() else { return -100 }
+
+        var score = Double(gap) * 1.35
+
+        // Clear hand break (fifth or more).
+        if gap >= handGapThreshold { score += 8 }
+        else if gap >= 5 { score += 3 }
+        else { score -= 6 }
+
+        // Typical LH: 1–3 notes (root, octave, or shell).
+        switch left.count {
+        case 1: score += 4
+        case 2: score += 5
+        case 3: score += 3
+        case 4: score += 0
+        default: score -= Double(left.count - 3) * 2
+        }
+
+        // RH should carry the chord body.
+        if right.count >= 2 { score += 3 }
+        if right.count >= 3 { score += 2 }
+
+        // Prefer LH staying in the bass / low middle register.
+        if leftMax <= 43 { score += 4 }       // through G3
+        else if leftMax < middleC { score += 1 }
+        else { score -= 5 }
+
+        if rightMin >= upperKeyboardRange.lowerBound { score += 2 }
+
+        // Penalize impossible one-hand stretches (~ major 10th+).
+        let leftSpan = leftMax - leftMin
+        let rightSpan = rightMax - rightMin
+        if leftSpan > 16 { score -= Double(leftSpan - 16) }
+        if rightSpan > 16 { score -= Double(rightSpan - 16) }
+
+        // Bonus when LH is octave / fifth doubles of one or two bass tones.
+        let leftPCs = Set(left.map { pitchClass(of: $0) })
+        if leftPCs.count == 1 { score += 4 }
+        else if leftPCs.count == 2 { score += 1 }
+
+        return score
+    }
+
     /// True when a voicing should use stacked LH/RH boards.
     static func spansBothHands(_ notes: [Int]) -> Bool {
         handDivision(for: notes)?.usesBothHands ?? false
+    }
+
+    /// Bass-only voicing (e.g. Sol2+Sol3) that should use one extended lower board.
+    static func lowerBoardOnly(for notes: [Int]) -> HandDivision? {
+        guard let division = handDivision(for: notes),
+              !division.leftNotes.isEmpty,
+              division.rightNotes.isEmpty else { return nil }
+        return division
     }
 
     static func whiteKeyCount(in range: ClosedRange<Int>) -> Int {

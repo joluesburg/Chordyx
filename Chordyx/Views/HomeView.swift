@@ -450,7 +450,7 @@ struct HostSetupView: View {
     @State private var sessionName = ""
     @State private var selectedKey: MusicalKey = .C
     @State private var selectedNotation: ChordNotation = .symbol
-    @State private var sessionKind: HostSessionKind = .progression
+    @State private var sessionKind: HostSessionKind = .liveChords
     @State private var performanceMode: SessionPerformanceMode = .live
     @State private var keySelectionMode: SessionKeySelectionMode = .auto
     @AppStorage(SessionManager.requireHostApprovalKey) private var requireHostApproval = false
@@ -575,8 +575,8 @@ struct HostSetupView: View {
 }
 
 private enum HostSessionKind: String, CaseIterable, Identifiable {
-    case progression
     case liveChords
+    case progression
 
     var id: String { rawValue }
 
