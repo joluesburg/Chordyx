@@ -81,10 +81,17 @@ struct PianoView: View {
         verticalSizeClass == .compact
     }
 
-    private var instrumentBoardHeight: CGFloat {
+    /// Minimum keyboard height — board grows into remaining sheet space so chords aren't clipped.
+    private var instrumentBoardMinHeight: CGFloat {
         if isCompactHeight { return 150 }
-        // Dual-row boards need more vertical room; fitted single-row stays classic height.
-        return showsFullPianoKeyboard ? 320 : 340
+        if PlatformDevice.isPhone { return showFretboardForGuest ? 220 : 280 }
+        return showsFullPianoKeyboard ? 300 : 320
+    }
+
+    private var chordLabelSize: CGFloat {
+        if isCompactHeight { return 28 }
+        if PlatformDevice.isPhone { return 34 }
+        return 44
     }
 
     private var keyboardHorizontalPadding: CGFloat {
@@ -99,7 +106,7 @@ struct PianoView: View {
         ZStack {
             AppTheme.backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: isCompactHeight ? 10 : 16) {
+            VStack(spacing: isCompactHeight ? 8 : (PlatformDevice.isPhone ? 10 : 16)) {
                 header
 
                 if isHost {
@@ -119,8 +126,8 @@ struct PianoView: View {
                         preferFlats: preferFlats,
                         isCompactHeight: isCompactHeight
                     )
-                    .frame(height: instrumentBoardHeight)
-                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: instrumentBoardMinHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
                     .padding(.horizontal, 12)
                 } else {
@@ -131,8 +138,8 @@ struct PianoView: View {
                         isCompactHeight: isCompactHeight,
                         onTap: { viewModel.playPianoNote($0) }
                     )
-                    .frame(height: instrumentBoardHeight)
-                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: instrumentBoardMinHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
                     .padding(.horizontal, keyboardHorizontalPadding)
                 }
@@ -142,13 +149,14 @@ struct PianoView: View {
                         .font(.footnote)
                         .foregroundStyle(AppTheme.textSecondary)
                         .multilineTextAlignment(.center)
-                } else {
+                } else if !PlatformDevice.isPhone || isCompactHeight {
                     Label("Following the host · your view", systemImage: "dot.radiowaves.left.and.right")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AppTheme.accentSecondary)
                 }
             }
-            .padding(.vertical, isCompactHeight ? 8 : (showsFullPianoKeyboard ? 16 : 24))
+            .padding(.vertical, isCompactHeight ? 6 : (PlatformDevice.isPhone ? 10 : (showsFullPianoKeyboard ? 16 : 24)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .preferredColorScheme(.dark)
     }
@@ -162,7 +170,7 @@ struct PianoView: View {
     }
 
     private var guestInstrumentPicker: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: PlatformDevice.isPhone ? 8 : 10) {
             PlatformSegmentedPicker(
                 "View as",
                 selection: Binding(
@@ -187,12 +195,17 @@ struct PianoView: View {
 
             if guestInstrument == .piano {
                 Toggle(isOn: $beginnerPianoTriads) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    if PlatformDevice.isPhone {
                         Text(String(localized: "Beginner triads"))
                             .font(.subheadline.weight(.semibold))
-                        Text(String(localized: "Show only major/minor triads from the host (Cmaj9 → C)"))
-                            .font(.caption2)
-                            .foregroundStyle(AppTheme.textSecondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(localized: "Beginner triads"))
+                                .font(.subheadline.weight(.semibold))
+                            Text(String(localized: "Show only major/minor triads from the host (Cmaj9 → C)"))
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
                     }
                 }
                 .tint(AppTheme.accent)
@@ -370,12 +383,12 @@ struct PianoView: View {
 
         let primaryText: Text = {
             if let chordName, notation == .latin || notation == .nashville {
-                return SolfegeChordText.make(chordName, notation: notation, size: 44)
+                return SolfegeChordText.make(chordName, notation: notation, size: chordLabelSize)
             }
-            return Text(primary).font(.system(size: 44, weight: .bold, design: .rounded))
+            return Text(primary).font(.system(size: chordLabelSize, weight: .bold, design: .rounded))
         }()
 
-        return VStack(spacing: 6) {
+        return VStack(spacing: 4) {
             primaryText
                 .foregroundStyle(AppTheme.accent)
                 .minimumScaleFactor(0.35)
@@ -397,10 +410,10 @@ struct PianoView: View {
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, isCompactHeight ? 8 : 14)
-        .padding(.horizontal, 20)
+        .padding(.vertical, isCompactHeight ? 6 : (PlatformDevice.isPhone ? 8 : 14))
+        .padding(.horizontal, 16)
         .glassCard()
-        .padding(.horizontal, 20)
+        .padding(.horizontal, PlatformDevice.isPhone ? 12 : 20)
     }
 }
 
@@ -521,9 +534,12 @@ struct ScrollablePianoKeyboard: View {
     }
 
     private func scrollToActiveNotes(_ proxy: ScrollViewProxy, notes: Set<Int>, animated: Bool) {
-        // Only follow notes that belong on this board — don't yank the other dual-row keyboard.
-        guard let target = notes.filter({ noteRange.contains($0) }).min() else { return }
-        let action = { proxy.scrollTo(target, anchor: .center) }
+        // Center on the chord span (not only the lowest note) so guests see all tones.
+        let inRange = notes.filter { noteRange.contains($0) }.sorted()
+        guard let first = inRange.first, let last = inRange.last else { return }
+        let mid = (first + last) / 2
+        let target = inRange.min(by: { abs($0 - mid) < abs($1 - mid) }) ?? first
+        let action = { proxy.scrollTo(target, anchor: UnitPoint.center) }
         if animated {
             withAnimation(.easeInOut(duration: 0.25), action)
         } else {

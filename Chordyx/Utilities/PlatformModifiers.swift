@@ -253,7 +253,8 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
     var onDismiss: (() -> Void)?
     @ViewBuilder var sheetContent: () -> SheetContent
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var phonePianoDetent: PresentationDetent = .fraction(0.72)
+    /// Large by default so guest dual-row / chord notes stay on-screen on iPhone.
+    @State private var phonePianoDetent: PresentationDetent = .large
 
     private var usesFullscreenPresentation: Bool {
         #if os(macOS)
@@ -288,18 +289,18 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
             } else if let onDismiss {
                 content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
                     sheetContent()
-                        // Tall default so dual-row keys stay playable; user can still expand to large.
-                        .presentationDetents([.fraction(0.72), .large], selection: $phonePianoDetent)
+                        // Nearly full height so guest chords aren't clipped under chrome.
+                        .presentationDetents([.fraction(0.88), .large], selection: $phonePianoDetent)
                         .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.72)))
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.88)))
                         .platformDesktopControls()
                 }
             } else {
                 content.sheet(isPresented: $isPresented) {
                     sheetContent()
-                        .presentationDetents([.fraction(0.72), .large], selection: $phonePianoDetent)
+                        .presentationDetents([.fraction(0.88), .large], selection: $phonePianoDetent)
                         .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.72)))
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.88)))
                         .platformDesktopControls()
                 }
             }

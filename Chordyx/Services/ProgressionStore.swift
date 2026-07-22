@@ -47,10 +47,13 @@ final class ProgressionStore {
         setlistFileURL = documents.appendingPathComponent("setlists.json")
         pdfDirectory = documents.appendingPathComponent("PDFCharts", isDirectory: true)
         try? FileManager.default.createDirectory(at: pdfDirectory, withIntermediateDirectories: true)
-        loadFromCloudIfNeeded()
+        // Local first — ubiquity container lookup can stall the Mac main thread at launch.
         load()
         loadSetlists()
         installStarterPackIfNeeded()
+        Task(priority: .utility) { [weak self] in
+            await self?.importFromCloudInBackground()
+        }
     }
 
     var sortedProgressions: [SavedProgression] {
@@ -423,6 +426,30 @@ final class ProgressionStore {
            let data = try? Data(contentsOf: cloudSetlistURL) {
             try? data.write(to: setlistFileURL, options: [.atomic])
         }
+    }
+
+    /// Resolves the iCloud container off the critical launch path, then reloads local UI state.
+    private func importFromCloudInBackground() async {
+        guard iCloudBackupEnabled else { return }
+        let progressionsURL = await Task.detached(priority: .utility) { () -> URL? in
+            FileManager.default.url(forUbiquityContainerIdentifier: Self.iCloudContainerID)?
+                .appendingPathComponent("Documents/saved_progressions.json")
+        }.value
+        let setlistsURL = await Task.detached(priority: .utility) { () -> URL? in
+            FileManager.default.url(forUbiquityContainerIdentifier: Self.iCloudContainerID)?
+                .appendingPathComponent("Documents/setlists.json")
+        }.value
+
+        if let progressionsURL, FileManager.default.fileExists(atPath: progressionsURL.path),
+           let data = try? Data(contentsOf: progressionsURL) {
+            try? data.write(to: fileURL, options: [.atomic])
+        }
+        if let setlistsURL, FileManager.default.fileExists(atPath: setlistsURL.path),
+           let data = try? Data(contentsOf: setlistsURL) {
+            try? data.write(to: setlistFileURL, options: [.atomic])
+        }
+        load()
+        loadSetlists()
     }
 
     private func syncToCloud() {

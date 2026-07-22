@@ -32,10 +32,15 @@ final class AdaptiveKeyLearningEngine {
     private var corrections: [KeyCorrectionEntry] = []
     private var neuralWeights: [[Float]] = []
     private var neuralBias: [Float] = []
+    /// Resolved off the main thread — never call `url(forUbiquityContainerIdentifier:)` on MainActor.
+    private var cloudStoreURL: URL?
+    private var isResolvingCloudStore = false
 
     private init() {
-        load()
+        // Fast local load only — iCloud resolution is async (ubiquity APIs can stall launch on Mac).
+        applyStore(from: localStoreURL, startDownloadIfNeeded: false)
         ensureNeuralInitialized()
+        resolveCloudStoreIfNeeded()
     }
 
     // MARK: - Public API
@@ -281,16 +286,9 @@ final class AdaptiveKeyLearningEngine {
 
     // MARK: - Persistence
 
-    /// Prefers iCloud Drive (same Apple ID on any iPhone/iPad/Mac) so every host keeps their AI memory without a Chordyx login.
+    /// Prefers iCloud Drive when resolved; otherwise Application Support (never blocks launch).
     private var storeURL: URL {
-        if let cloudRoot = FileManager.default.url(forUbiquityContainerIdentifier: nil) {
-            let dir = cloudRoot
-                .appendingPathComponent("Documents", isDirectory: true)
-                .appendingPathComponent("Chordyx", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            return dir.appendingPathComponent(Self.storeFileName)
-        }
-        return localStoreURL
+        cloudStoreURL ?? localStoreURL
     }
 
     private var localStoreURL: URL {
@@ -308,10 +306,8 @@ final class AdaptiveKeyLearningEngine {
         var neuralBias: [Float]
     }
 
-    private func load() {
-        migrateLocalStoreToICloudIfNeeded()
-        let url = storeURL
-        if FileManager.default.isUbiquitousItem(at: url) {
+    private func applyStore(from url: URL, startDownloadIfNeeded: Bool) {
+        if startDownloadIfNeeded, FileManager.default.isUbiquitousItem(at: url) {
             try? FileManager.default.startDownloadingUbiquitousItem(at: url)
         }
         guard let data = try? Data(contentsOf: url),
@@ -324,17 +320,42 @@ final class AdaptiveKeyLearningEngine {
 
     /// Call when the app becomes active so iCloud updates from other devices are picked up.
     func reloadFromDisk() {
-        load()
+        applyStore(from: storeURL, startDownloadIfNeeded: cloudStoreURL != nil)
         ensureNeuralInitialized()
+        resolveCloudStoreIfNeeded()
     }
 
-    private func migrateLocalStoreToICloudIfNeeded() {
+    private func resolveCloudStoreIfNeeded() {
+        guard cloudStoreURL == nil, !isResolvingCloudStore else { return }
+        isResolvingCloudStore = true
         let local = localStoreURL
-        let cloud = storeURL
-        guard local != cloud,
-              FileManager.default.fileExists(atPath: local.path),
-              !FileManager.default.fileExists(atPath: cloud.path) else { return }
-        try? FileManager.default.copyItem(at: local, to: cloud)
+        Task.detached(priority: .utility) {
+            // Apple: do not call ubiquity container APIs on the main thread.
+            let cloudRoot = FileManager.default.url(forUbiquityContainerIdentifier: nil)
+            let cloudURL: URL? = {
+                guard let cloudRoot else { return nil }
+                let dir = cloudRoot
+                    .appendingPathComponent("Documents", isDirectory: true)
+                    .appendingPathComponent("Chordyx", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                return dir.appendingPathComponent(Self.storeFileName)
+            }()
+
+            if let cloudURL,
+               FileManager.default.fileExists(atPath: local.path),
+               !FileManager.default.fileExists(atPath: cloudURL.path) {
+                try? FileManager.default.copyItem(at: local, to: cloudURL)
+            }
+
+            await MainActor.run {
+                self.cloudStoreURL = cloudURL
+                self.isResolvingCloudStore = false
+                if let cloudURL {
+                    self.applyStore(from: cloudURL, startDownloadIfNeeded: true)
+                    self.ensureNeuralInitialized()
+                }
+            }
+        }
     }
 
     private func save() {
@@ -351,6 +372,9 @@ final class AdaptiveKeyLearningEngine {
         } catch {
             // Fall back to on-device memory if iCloud is unavailable.
             try? data.write(to: localStoreURL, options: .atomic)
+        }
+        if cloudStoreURL == nil {
+            resolveCloudStoreIfNeeded()
         }
     }
 }
