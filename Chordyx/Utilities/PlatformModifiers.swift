@@ -252,19 +252,6 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     var onDismiss: (() -> Void)?
     @ViewBuilder var sheetContent: () -> SheetContent
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    /// Large by default so guest dual-row / chord notes stay on-screen on iPhone.
-    @State private var phonePianoDetent: PresentationDetent = .large
-
-    private var usesFullscreenPresentation: Bool {
-        #if os(macOS)
-        true
-        #elseif os(iOS)
-        !PlatformDevice.isPhone
-        #else
-        false
-        #endif
-    }
 
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -278,31 +265,19 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
             }
         }
         #else
-        Group {
-            if usesFullscreenPresentation {
-                content.fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
-                    sheetContent()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(AppTheme.backgroundGradient.ignoresSafeArea())
-                        .platformDesktopControls()
-                }
-            } else if let onDismiss {
-                content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
-                    sheetContent()
-                        // Nearly full height so guest chords aren't clipped under chrome.
-                        .presentationDetents([.fraction(0.88), .large], selection: $phonePianoDetent)
-                        .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.88)))
-                        .platformDesktopControls()
-                }
-            } else {
-                content.sheet(isPresented: $isPresented) {
-                    sheetContent()
-                        .presentationDetents([.fraction(0.88), .large], selection: $phonePianoDetent)
-                        .presentationDragIndicator(.visible)
-                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.88)))
-                        .platformDesktopControls()
-                }
+        if let onDismiss {
+            content.fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
+                sheetContent()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppTheme.backgroundGradient.ignoresSafeArea())
+                    .platformDesktopControls()
+            }
+        } else {
+            content.fullScreenCover(isPresented: $isPresented) {
+                sheetContent()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppTheme.backgroundGradient.ignoresSafeArea())
+                    .platformDesktopControls()
             }
         }
         #endif

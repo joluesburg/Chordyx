@@ -794,16 +794,24 @@ final class SessionViewModel {
             return
         }
 
+        let preferFlats = payload.key.prefersFlats
         let symbol: String?
         if pitchClasses.count == 1, let pc = pitchClasses.first {
-            let names = payload.key.prefersFlats ? Transposer.flatNames : Transposer.sharpNames
+            let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
             symbol = names[pc]
         } else {
-            var resolved = ChordRecognizer.symbol(
-                forPitchClasses: pitchClasses,
-                bassPitchClass: bass,
-                preferFlats: payload.key.prefersFlats
+            // Two-hand analysis: LH root/bass + RH color (Sol + Fa maj → G, not F).
+            var resolved = ChordRecognizer.symbolConsideringBothHands(
+                notes: indices,
+                preferFlats: preferFlats
             )
+            if resolved == nil {
+                resolved = ChordRecognizer.symbol(
+                    forPitchClasses: pitchClasses,
+                    bassPitchClass: bass,
+                    preferFlats: preferFlats
+                )
+            }
             if resolved == nil, let index = indices.min() {
                 resolved = singleNoteSymbol(for: index)
             }

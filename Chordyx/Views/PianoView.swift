@@ -13,6 +13,7 @@ struct PianoView: View {
     @AppStorage("guestViewInstrument") private var guestInstrumentRaw = ViewInstrument.piano.rawValue
     @AppStorage("guestBassStrings") private var guestBassStrings = 4
     @AppStorage(GuestDisplaySettings.beginnerPianoTriadsKey) private var beginnerPianoTriads = false
+    @State private var showGuestPianoControls = false
 
     private var isHost: Bool { viewModel.role == .host }
     private var preferFlats: Bool { viewModel.payload.key.prefersFlats }
@@ -22,16 +23,33 @@ struct PianoView: View {
         !isHost && beginnerPianoTriads
     }
 
+    /// Notes to light on the keyboard. Guests rebuild from the live chord symbol when
+    /// piano note packets are empty or don't cover the chord tones (common with A/La sync glitches).
     private var activeNotes: [Int] {
-        let raw = viewModel.payload.pianoNotes.map { PianoNote.normalizeToInternal($0) }
-        guard usesBeginnerPianoTriads,
-              let simplified = ChordTheory.beginnerTriadNotes(
-                from: raw,
-                symbol: viewModel.payload.liveChordSymbol
-              ) else {
-            return raw
+        let raw = viewModel.payload.pianoNotes
+            .map { PianoNote.normalizeToInternal($0) }
+            .filter { PianoNote.keyboardRange.contains($0) }
+        let symbol = viewModel.payload.liveChordSymbol
+
+        if usesBeginnerPianoTriads,
+           let simplified = ChordTheory.beginnerTriadNotes(from: raw, symbol: symbol) {
+            return simplified
         }
-        return simplified
+
+        if !isHost, let symbol,
+           let triad = ChordTheory.tones(for: symbol) {
+            let rawPCs = Set(raw.map { PianoNote.pitchClass(of: $0) })
+            let notesMissChord = raw.isEmpty || !triad.pitchClasses.isSubset(of: rawPCs)
+            if notesMissChord,
+               let rebuilt = ChordTheory.beginnerTriadNotes(
+                from: raw.isEmpty ? [PianoNote.middleC] : raw,
+                symbol: symbol
+               ) {
+                return rebuilt
+            }
+        }
+
+        return raw
     }
 
     private var activeNoteSet: Set<Int> { Set(activeNotes) }
@@ -81,15 +99,24 @@ struct PianoView: View {
         verticalSizeClass == .compact
     }
 
-    /// Minimum keyboard height — board grows into remaining sheet space so chords aren't clipped.
-    private var instrumentBoardMinHeight: CGFloat {
+    /// Guest piano view fills the screen; dual-row keeps both hands visible.
+    private var usesImmersiveGuestPiano: Bool {
+        !isHost && guestInstrument == .piano
+    }
+
+    /// Classic board heights — dual-row stacks C3+ over A0–B2 without stretching keys tall.
+    private var instrumentBoardHeight: CGFloat {
         if isCompactHeight { return 150 }
-        if PlatformDevice.isPhone { return showFretboardForGuest ? 220 : 280 }
-        return showsFullPianoKeyboard ? 300 : 320
+        if usesImmersiveGuestPiano { return 304 }
+        return showsFullPianoKeyboard ? 280 : 308
+    }
+
+    private var forceDualPianoRows: Bool {
+        usesImmersiveGuestPiano && !isCompactHeight
     }
 
     private var chordLabelSize: CGFloat {
-        if isCompactHeight { return 28 }
+        if usesImmersiveGuestPiano || isCompactHeight { return 28 }
         if PlatformDevice.isPhone { return 34 }
         return 44
     }
@@ -98,7 +125,7 @@ struct PianoView: View {
         #if os(macOS)
         8
         #else
-        showsFullPianoKeyboard ? 16 : 12
+        usesImmersiveGuestPiano ? 8 : (showsFullPianoKeyboard ? 16 : 12)
         #endif
     }
 
@@ -106,59 +133,191 @@ struct PianoView: View {
         ZStack {
             AppTheme.backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: isCompactHeight ? 8 : (PlatformDevice.isPhone ? 10 : 16)) {
-                header
+            if usesImmersiveGuestPiano {
+                immersiveGuestPianoBody
+            } else {
+                standardPianoBody
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
 
-                if isHost {
-                    midiStatus
-                } else {
-                    guestInstrumentPicker
+    /// Full-bleed guest piano: keyboards dominate; chord sits in a non-blocking orb.
+    private var immersiveGuestPianoBody: some View {
+        VStack(spacing: 10) {
+            immersiveTopBar
+
+            if showGuestPianoControls {
+                guestInstrumentPicker
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            Spacer(minLength: 4)
+
+            instrumentBoard
+                .frame(height: instrumentBoardHeight)
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, keyboardHorizontalPadding)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var standardPianoBody: some View {
+        VStack(spacing: isCompactHeight ? 8 : (PlatformDevice.isPhone ? 10 : 16)) {
+            header
+
+            if isHost {
+                midiStatus
+            } else {
+                guestInstrumentPicker
+            }
+
+            noteDisplay
+
+            instrumentBoard
+                .frame(height: instrumentBoardHeight)
+                .frame(maxWidth: .infinity)
+                .layoutPriority(1)
+                .padding(.horizontal, showFretboardForGuest ? 12 : keyboardHorizontalPadding)
+
+            if isHost {
+                Text("Tap keys to show the notes to everyone in the session")
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, isCompactHeight ? 6 : (PlatformDevice.isPhone ? 10 : (showsFullPianoKeyboard ? 16 : 24)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var immersiveTopBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showGuestPianoControls.toggle()
                 }
+            } label: {
+                Image(systemName: showGuestPianoControls ? "chevron.up.circle.fill" : "slider.horizontal.3")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            .accessibilityLabel(String(localized: "Piano options"))
 
-                noteDisplay
-
-                if showFretboardForGuest, let fret = guestInstrument.fretInstrument {
-                    FretboardView(
-                        instrument: fret,
-                        bassStrings: guestBassStrings,
-                        pitchClasses: fretboardPitchClasses,
-                        rootPitchClass: rootPitchClass,
-                        preferFlats: preferFlats,
-                        isCompactHeight: isCompactHeight
-                    )
-                    .frame(minHeight: instrumentBoardMinHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                    .padding(.horizontal, 12)
-                } else {
-                    AdaptivePianoBoard(
-                        activeNotes: activeNoteSet,
-                        preferFlats: preferFlats,
-                        isInteractive: isHost,
-                        isCompactHeight: isCompactHeight,
-                        onTap: { viewModel.playPianoNote($0) }
-                    )
-                    .frame(minHeight: instrumentBoardMinHeight)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-                    .padding(.horizontal, keyboardHorizontalPadding)
-                }
-
-                if isHost {
-                    Text("Tap keys to show the notes to everyone in the session")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .multilineTextAlignment(.center)
-                } else if !PlatformDevice.isPhone || isCompactHeight {
-                    Label("Following the host · your view", systemImage: "dot.radiowaves.left.and.right")
-                        .font(.footnote.weight(.medium))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.payload.sessionName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(1)
+                if usesBeginnerPianoTriads {
+                    Text(String(localized: "Beginner"))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(AppTheme.accentSecondary)
                 }
             }
-            .padding(.vertical, isCompactHeight ? 6 : (PlatformDevice.isPhone ? 10 : (showsFullPianoKeyboard ? 16 : 24)))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            Spacer(minLength: 8)
+
+            pianoChordOrb
+                .frame(width: 88, height: 88)
+
+            overlayHeaderActions
         }
-        .preferredColorScheme(.dark)
+        .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private var instrumentBoard: some View {
+        if showFretboardForGuest, let fret = guestInstrument.fretInstrument {
+            FretboardView(
+                instrument: fret,
+                bassStrings: guestBassStrings,
+                pitchClasses: fretboardPitchClasses,
+                rootPitchClass: rootPitchClass,
+                preferFlats: preferFlats,
+                isCompactHeight: isCompactHeight
+            )
+        } else {
+            AdaptivePianoBoard(
+                activeNotes: activeNoteSet,
+                preferFlats: preferFlats,
+                isInteractive: isHost,
+                isCompactHeight: isCompactHeight,
+                forceDualRow: forceDualPianoRows,
+                onTap: { viewModel.playPianoNote($0) }
+            )
+        }
+    }
+
+    /// Large chord in a circle — top bar only, never covers the keyboards.
+    private var pianoChordOrb: some View {
+        let chord = displayedChordName
+        return ZStack {
+            Circle()
+                .fill(AppTheme.surfaceElevated.opacity(0.92))
+            Circle()
+                .stroke(AppTheme.accent.opacity(chord == nil ? 0.2 : 0.55), lineWidth: 2)
+
+            Group {
+                if let chord {
+                    chordOrbPrimaryText(chord)
+                        .foregroundStyle(AppTheme.accent)
+                        .minimumScaleFactor(0.4)
+                        .lineLimit(1)
+                } else {
+                    Text("—")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+            }
+            .padding(10)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(chord.map { String(localized: "Chord \($0)") } ?? String(localized: "No chord"))
+    }
+
+    private var displayedChordName: String? {
+        let sorted = activeNotes.sorted()
+        let pitchClasses = Set(sorted.map { PianoNote.pitchClass(forStored: $0) })
+        let bass = sorted.first.map { PianoNote.pitchClass(forStored: $0) }
+        let recognizedFromKeys = ChordRecognizer.symbol(
+            forPitchClasses: pitchClasses,
+            bassPitchClass: bass,
+            preferFlats: preferFlats
+        ) ?? sorted.first.map { viewModel.singleNoteSymbol(for: $0) }
+        let hostSymbol = viewModel.payload.liveChordSymbol ?? recognizedFromKeys
+        let displaySymbol: String? = {
+            guard let hostSymbol else { return nil }
+            if usesBeginnerPianoTriads,
+               let simple = ChordTheory.beginnerTriadSymbol(for: hostSymbol, preferFlats: preferFlats) {
+                return simple
+            }
+            return hostSymbol
+        }()
+        return displaySymbol.map { symbol in
+            switch displayNotation {
+            case .latin: ChordCatalog.latinName(forSymbol: symbol)
+            case .nashville: NashvilleConverter.number(for: symbol, in: viewModel.payload.key)
+            case .symbol: symbol
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func chordOrbPrimaryText(_ chord: String) -> some View {
+        if displayNotation == .latin || displayNotation == .nashville {
+            SolfegeChordText.make(chord, notation: displayNotation, size: 26)
+        } else {
+            Text(chord)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+        }
     }
 
     private var guestGroup: String {
@@ -426,6 +585,7 @@ private struct AdaptivePianoBoard: View {
     let preferFlats: Bool
     let isInteractive: Bool
     let isCompactHeight: Bool
+    var forceDualRow: Bool = false
     let onTap: (Int) -> Void
 
     private enum Layout {
@@ -436,6 +596,7 @@ private struct AdaptivePianoBoard: View {
 
     private func layout(for width: CGFloat) -> Layout {
         if isCompactHeight { return .scrollSingle }
+        if forceDualRow { return .dualRow }
         if PianoNote.canFitComfortably(range: PianoNote.keyboardRange, in: width) {
             return .fittedSingle
         }
@@ -448,6 +609,7 @@ private struct AdaptivePianoBoard: View {
             switch boardLayout {
             case .fittedSingle:
                 // Full 88-key span scaled to the viewport — no horizontal scroll.
+                let keyHeight = min(geo.size.height, 280)
                 PianoKeyboard(
                     activeNotes: activeNotes,
                     preferFlats: preferFlats,
@@ -455,10 +617,11 @@ private struct AdaptivePianoBoard: View {
                     noteRange: PianoNote.keyboardRange,
                     onTap: onTap
                 )
-                .frame(width: geo.size.width, height: geo.size.height)
+                .frame(width: geo.size.width, height: keyHeight)
 
             case .dualRow:
-                let rowHeight = max(120, (geo.size.height - 8) / 2)
+                // Fixed classic row height (~150) — never stretch keys to fill the sheet.
+                let rowHeight: CGFloat = 150
                 VStack(spacing: 8) {
                     pianoRow(
                         range: PianoNote.upperKeyboardRange,
@@ -473,7 +636,7 @@ private struct AdaptivePianoBoard: View {
                         height: rowHeight
                     )
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
+                .frame(width: geo.size.width, height: rowHeight * 2 + 8, alignment: .top)
 
             case .scrollSingle:
                 ScrollablePianoKeyboard(
@@ -482,7 +645,7 @@ private struct AdaptivePianoBoard: View {
                     isInteractive: isInteractive,
                     onTap: onTap
                 )
-                .frame(width: geo.size.width, height: geo.size.height)
+                .frame(width: geo.size.width, height: min(geo.size.height, 150))
             }
         }
     }
@@ -535,16 +698,34 @@ struct ScrollablePianoKeyboard: View {
 
     private func scrollToActiveNotes(_ proxy: ScrollViewProxy, notes: Set<Int>, animated: Bool) {
         // Center on the chord span (not only the lowest note) so guests see all tones.
+        // Always scroll to a white key — black keys use `.offset`, so ScrollViewReader
+        // would jump to the leading edge and hide Amaj / other sharp chords.
         let inRange = notes.filter { noteRange.contains($0) }.sorted()
         guard let first = inRange.first, let last = inRange.last else { return }
         let mid = (first + last) / 2
-        let target = inRange.min(by: { abs($0 - mid) < abs($1 - mid) }) ?? first
+        let preferred = inRange.min(by: { abs($0 - mid) < abs($1 - mid) }) ?? first
+        let target = scrollAnchorNote(near: preferred, in: inRange)
         let action = { proxy.scrollTo(target, anchor: UnitPoint.center) }
         if animated {
             withAnimation(.easeInOut(duration: 0.25), action)
         } else {
             action()
         }
+    }
+
+    /// Prefer a white key id for ScrollViewReader (black keys are overlay-offset).
+    private func scrollAnchorNote(near preferred: Int, in notes: [Int]) -> Int {
+        if !PianoNote.isBlack(preferred) { return preferred }
+        let whiteNearby = notes.filter { !PianoNote.isBlack($0) }
+        if let closest = whiteNearby.min(by: { abs($0 - preferred) < abs($1 - preferred) }) {
+            return closest
+        }
+        // Fall back to the white key under / beside the black note.
+        let below = preferred - 1
+        if noteRange.contains(below), !PianoNote.isBlack(below) { return below }
+        let above = preferred + 1
+        if noteRange.contains(above), !PianoNote.isBlack(above) { return above }
+        return preferred
     }
 
     private func scrollToDefault(_ proxy: ScrollViewProxy) {
@@ -680,21 +861,23 @@ struct PianoKeyboard: View {
                     }
                 }
 
-                ForEach(blackKeyPlacements) { placement in
-                    BlackKey(
-                        label: PianoNote.keyboardLabel(for: placement.index, preferFlats: preferFlats),
-                        isActive: isActive(placement.index),
-                        labelFontSize: blackLabelFontSize
-                    )
-                    .frame(width: blackWidth, height: blackHeight)
-                    .offset(
-                        x: CGFloat(placement.whiteSlot + 1) * whiteWidth - blackWidth / 2,
-                        y: 0
-                    )
-                    .id(placement.index)
-                    .zIndex(1)
-                    .allowsHitTesting(false)
-                }
+        // Black keys are drawn with `.offset` (layout frame stays at leading edge).
+        // Don't expose them as ScrollViewReader ids — scrolling to C#/F# jumped to x=0
+        // and hid Amaj / other sharp chords on the guest piano.
+        ForEach(blackKeyPlacements) { placement in
+            BlackKey(
+                label: PianoNote.keyboardLabel(for: placement.index, preferFlats: preferFlats),
+                isActive: isActive(placement.index),
+                labelFontSize: blackLabelFontSize
+            )
+            .frame(width: blackWidth, height: blackHeight)
+            .offset(
+                x: CGFloat(placement.whiteSlot + 1) * whiteWidth - blackWidth / 2,
+                y: 0
+            )
+            .zIndex(1)
+            .allowsHitTesting(false)
+        }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .contentShape(Rectangle())

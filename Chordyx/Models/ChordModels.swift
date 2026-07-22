@@ -657,7 +657,27 @@ enum Transposer {
 
     /// Splits a chord symbol into its root (with accidental) and the remaining quality.
     static func parse(_ symbol: String) -> (root: String, suffix: String)? {
-        let chars = Array(symbol)
+        let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Accept Latin solfège roots used in display (La, Lam7, …) as well as letter names.
+        let latinRoots = ["Sol", "Do", "Re", "Mi", "Fa", "La", "Si"]
+        for latin in latinRoots {
+            if trimmed.hasPrefix(latin) || trimmed.hasPrefix(latin.lowercased()) {
+                let rootLength = latin.count
+                var end = rootLength
+                let chars = Array(trimmed)
+                if chars.count > rootLength {
+                    switch chars[rootLength] {
+                    case "#", "♯", "b", "♭": end = rootLength + 1
+                    default: break
+                    }
+                }
+                return (String(chars[0..<end]), String(chars[end...]))
+            }
+        }
+
+        let chars = Array(trimmed)
         guard let first = chars.first,
               "ABCDEFGabcdefg".contains(first) else { return nil }
 
@@ -672,7 +692,29 @@ enum Transposer {
     }
 
     static func pitchClass(ofRoot root: String) -> Int? {
-        let chars = Array(root)
+        let normalized = root
+            .replacingOccurrences(of: "♯", with: "#")
+            .replacingOccurrences(of: "♭", with: "b")
+        let latinMap: [String: Int] = [
+            "Do": 0, "Re": 2, "Mi": 4, "Fa": 5, "Sol": 7, "La": 9, "Si": 11
+        ]
+        for (latin, base) in latinMap {
+            if normalized.hasPrefix(latin) || normalized.lowercased().hasPrefix(latin.lowercased()) {
+                var value = base
+                let accidentalIndex = latin.count
+                let chars = Array(normalized)
+                if chars.count > accidentalIndex {
+                    switch chars[accidentalIndex] {
+                    case "#": value += 1
+                    case "b": value -= 1
+                    default: break
+                    }
+                }
+                return ((value % 12) + 12) % 12
+            }
+        }
+
+        let chars = Array(normalized)
         guard let letter = chars.first,
               let base = naturalPitchClass[Character(letter.uppercased())] else { return nil }
         var value = base
@@ -853,7 +895,7 @@ enum ChordTheory {
         return triad.isMinor ? rootName + "m" : rootName
     }
 
-    /// Piano keys to highlight for a beginner: root–3–5 near the host's hand.
+    /// Piano keys to highlight for a beginner: root–3–5 near the host's right hand.
     static func beginnerTriadNotes(
         from hostNotes: [Int],
         symbol: String?
@@ -862,7 +904,10 @@ enum ChordTheory {
               let triad = beginnerMajorMinorTriad(for: symbol) else { return nil }
 
         let thirdInterval = triad.isMinor ? 3 : 4
-        let anchor = hostNotes.min() ?? PianoNote.middleC
+        // Prefer the right-hand register so the guest sees one clean treble triad.
+        let split = PianoNote.upperKeyboardRange.lowerBound
+        let rightHand = hostNotes.filter { $0 >= split }
+        let anchor = rightHand.min() ?? hostNotes.max() ?? PianoNote.middleC
         let rootNote = nearestKeyboardNote(pitchClass: triad.root, near: anchor)
         let candidates = [rootNote, rootNote + thirdInterval, rootNote + 7]
             .filter { PianoNote.keyboardRange.contains($0) }
@@ -1025,6 +1070,117 @@ enum ChordRecognizer {
         }
         return nil
     }
+
+    /// Split between left-hand (below C3) and right-hand (C3+) registers.
+    static var handSplitIndex: Int { PianoNote.upperKeyboardRange.lowerBound }
+
+    /// Learns from both hands: LH chord or bass root + RH quality.
+    /// Example: LH Sol (G) + RH Fa major → `G` for beginner/live labeling.
+    static func symbolConsideringBothHands(
+        notes: [Int],
+        preferFlats: Bool
+    ) -> String? {
+        let normalized = notes
+            .map { PianoNote.normalizeToInternal($0) }
+            .filter { PianoNote.keyboardRange.contains($0) }
+            .sorted()
+        guard !normalized.isEmpty else { return nil }
+
+        if let remembered = TwoHandChordMemory.shared.recall(notes: normalized) {
+            return remembered
+        }
+
+        let split = handSplitIndex
+        let left = normalized.filter { $0 < split }
+        let right = normalized.filter { $0 >= split }
+
+        let leftPCs = Set(left.map { PianoNote.pitchClass(of: $0) })
+        let rightPCs = Set(right.map { PianoNote.pitchClass(of: $0) })
+        let leftBass = left.min().map { PianoNote.pitchClass(of: $0) }
+        let rightBass = right.min().map { PianoNote.pitchClass(of: $0) }
+
+        let leftSymbol = symbol(forPitchClasses: leftPCs, bassPitchClass: leftBass, preferFlats: preferFlats)
+        let rightSymbol = symbol(forPitchClasses: rightPCs, bassPitchClass: rightBass, preferFlats: preferFlats)
+
+        let resolved: String?
+        // 1) Full left-hand chord (e.g. G–B–D) wins over a competing right-hand triad.
+        if let leftSymbol, leftPCs.count >= 3 {
+            resolved = stripSlashBass(leftSymbol)
+        }
+        // 2) Left-hand bass/root + right-hand major/minor color → root from LH, quality from RH.
+        //    Sol in LH + Fa major in RH → G (not F).
+        else if let leftBass,
+                let rightSymbol,
+                let rhTriad = ChordTheory.beginnerMajorMinorTriad(for: rightSymbol) {
+            let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
+            resolved = rhTriad.isMinor ? names[leftBass] + "m" : names[leftBass]
+        } else if let rightSymbol {
+            resolved = stripSlashBass(rightSymbol)
+        } else if let leftSymbol {
+            resolved = stripSlashBass(leftSymbol)
+        } else {
+            let allPCs = Set(normalized.map { PianoNote.pitchClass(of: $0) })
+            let bass = normalized.min().map { PianoNote.pitchClass(of: $0) }
+            resolved = symbol(forPitchClasses: allPCs, bassPitchClass: bass, preferFlats: preferFlats)
+                .map(stripSlashBass)
+        }
+
+        if let resolved {
+            TwoHandChordMemory.shared.remember(notes: normalized, symbol: resolved)
+        }
+        return resolved
+    }
+
+    private static func stripSlashBass(_ symbol: String) -> String {
+        symbol.split(separator: "/").first.map(String.init) ?? symbol
+    }
+}
+
+// MARK: - Fast two-hand chord memory (learns live voicings quickly)
+
+/// Remembers recent left/right-hand note fingerprints → chord symbol so live
+/// two-hand voicings (LH root + RH triad) stabilize after one or two plays.
+final class TwoHandChordMemory: @unchecked Sendable {
+    static let shared = TwoHandChordMemory()
+
+    private let lock = NSLock()
+    private var hits: [String: (symbol: String, count: Int)] = [:]
+    private let limit = 80
+
+    func recall(notes: [Int]) -> String? {
+        let key = fingerprint(notes)
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = hits[key], entry.count >= 1 else { return nil }
+        return entry.symbol
+    }
+
+    func remember(notes: [Int], symbol: String) {
+        let key = fingerprint(notes)
+        lock.lock()
+        defer { lock.unlock() }
+        if var entry = hits[key], entry.symbol == symbol {
+            entry.count += 1
+            hits[key] = entry
+        } else {
+            hits[key] = (symbol, 1)
+        }
+        if hits.count > limit {
+            let sorted = hits.sorted { $0.value.count < $1.value.count }
+            for item in sorted.prefix(hits.count - limit) {
+                hits.removeValue(forKey: item.key)
+            }
+        }
+    }
+
+    private func fingerprint(_ notes: [Int]) -> String {
+        let split = ChordRecognizer.handSplitIndex
+        let left = Set(notes.filter { $0 < split }.map { PianoNote.pitchClass(of: $0) }).sorted()
+        let right = Set(notes.filter { $0 >= split }.map { PianoNote.pitchClass(of: $0) }).sorted()
+        let leftPart = left.map(String.init).joined(separator: ",")
+        let rightPart = right.map(String.init).joined(separator: ",")
+        return "L\(leftPart)|R\(rightPart)"
+    }
 }
 
 /// Helpers for naming piano keys by absolute semitone index (0 = C0).
@@ -1073,9 +1229,16 @@ enum PianoNote {
     }
 
     /// Convert incoming value (legacy MIDI storage or internal) to internal index.
+    /// Internal indices occupy 9…96; MIDI occupies 21…108. Prefer internal when the
+    /// value already sits in the 88-key index span so A3 (45) is not mistaken for MIDI.
     static func normalizeToInternal(_ value: Int) -> Int {
         if keyboardRange.contains(value) { return value }
-        if keyboardMIDIRange.contains(value) { return fromMIDINote(value) }
+        if value > keyboardRange.upperBound, keyboardMIDIRange.contains(value) {
+            return fromMIDINote(value)
+        }
+        if value < keyboardRange.lowerBound, keyboardMIDIRange.contains(value) {
+            return fromMIDINote(value)
+        }
         return value
     }
 
