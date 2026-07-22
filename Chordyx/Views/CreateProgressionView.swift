@@ -8,6 +8,7 @@ import SwiftUI
 /// Build and save a chord progression from the library — no live session required.
 struct CreateProgressionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.usesHomeDestinationShell) private var usesHomeDestinationShell
     @Bindable var viewModel: SessionViewModel
     @Bindable var store: ProgressionStore
 
@@ -108,9 +109,11 @@ struct CreateProgressionView: View {
             .navigationTitle("New Progression")
             .platformInlineNavigationTitle()
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(AppTheme.accent)
+                if !usesHomeDestinationShell {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                            .foregroundStyle(AppTheme.accent)
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     if !chords.isEmpty {

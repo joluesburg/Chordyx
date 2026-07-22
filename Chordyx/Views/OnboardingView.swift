@@ -13,6 +13,8 @@ struct OnboardingView: View {
     @State private var page = 0
     @State private var nameText = ""
 
+    private let lastPage = 4
+
     private var preferredNotation: ChordNotation {
         get { ChordNotation(rawValue: preferredNotationRaw) ?? .symbol }
         set { preferredNotationRaw = newValue.rawValue }
@@ -25,9 +27,10 @@ struct OnboardingView: View {
             VStack(spacing: 24) {
                 TabView(selection: $page) {
                     welcomePage.tag(0)
-                    namePage.tag(1)
-                    notationPage.tag(2)
-                    networkPage.tag(3)
+                    pathsPage.tag(1)
+                    namePage.tag(2)
+                    notationPage.tag(3)
+                    networkPage.tag(4)
                 }
                 #if os(iOS)
                 .tabViewStyle(.page(indexDisplayMode: .always))
@@ -35,8 +38,8 @@ struct OnboardingView: View {
                 .tabViewStyle(.automatic)
                 #endif
 
-                Button(page == 3 ? "Get Started" : "Continue") {
-                    if page < 3 {
+                Button(page == lastPage ? String(localized: "Get Started") : String(localized: "Continue")) {
+                    if page < lastPage {
                         withAnimation { page += 1 }
                     } else {
                         finish()
@@ -64,6 +67,44 @@ struct OnboardingView: View {
             title: "Welcome to Chordyx",
             message: "Share chord progressions in real time with your band — host, join, or practice solo."
         )
+    }
+
+    private var pathsPage: some View {
+        VStack(spacing: 20) {
+            onboardingPage(
+                icon: "person.3.fill",
+                title: "Host, join, or practice",
+                message: "Host a session for the band, join a nearby host, or practice solo with the chord ring."
+            )
+
+            VStack(alignment: .leading, spacing: 12) {
+                pathRow(icon: "dot.radiowaves.left.and.right", title: "Host a Session", detail: "You lead the chords; the band follows.")
+                pathRow(icon: "person.badge.plus", title: "Join a Session", detail: "Same Wi‑Fi nearby, or Internet join code with iCloud.")
+                pathRow(icon: "metronome", title: "Practice Solo", detail: "Rehearse with the ring and metronome.")
+            }
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private func pathRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var namePage: some View {

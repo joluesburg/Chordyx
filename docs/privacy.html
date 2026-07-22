@@ -34,7 +34,7 @@
   <main class="wrap">
     <a class="back" href="index.html">← Chordyx</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective date: June 10, 2026</p>
+    <p class="updated">Effective date: July 22, 2026</p>
 
     <p>
       Chordyx (“the App”) is developed by Jose L. Espinosa Burgos (“we,” “us,” or “our”).
@@ -43,19 +43,22 @@
 
     <h2>Summary</h2>
     <p>
-      Chordyx is designed to work locally on your device and between nearby devices.
-      We do not operate a cloud service, user accounts, or advertising platform for the App.
-      We do not sell your personal information.
+      Chordyx is designed to work primarily on your device and between nearby devices over local Wi‑Fi or Bluetooth.
+      Chordyx does not require a Chordyx account, does not sell your personal information, and does not include advertising or analytics SDKs.
+      Optional Internet join-code backup and optional library backup use <strong>your Apple iCloud</strong> (CloudKit) when you enable them — not a Chordyx-operated user database.
     </p>
 
     <h2>Information the App stores on your device</h2>
-    <p>The App may store the following data only on your device:</p>
+    <p>The App may store the following data on your device:</p>
     <ul>
       <li><strong>Saved chord progressions</strong> — names, keys, chords, and related settings you choose to save</li>
       <li><strong>Display name</strong> — the name you enter so other musicians can identify you in a session (defaults to your device name if you do not change it)</li>
       <li><strong>App preferences</strong> — such as metronome volume, notation choice, and other in-app settings</li>
     </ul>
-    <p>This data stays in the App’s local storage unless you delete it or remove the App.</p>
+    <p>
+      This data stays in the App’s local storage unless you delete it, remove the App,
+      or turn on optional iCloud backup for progressions (when available in Settings).
+    </p>
 
     <h2>Live sessions with other musicians</h2>
     <p>
@@ -65,11 +68,22 @@
       are shared directly between connected devices.
     </p>
     <p>
-      That communication is peer-to-peer. It does not pass through our servers.
-      Apple’s system may encrypt this connection using encryption built into iOS/iPadOS.
+      That local communication is peer-to-peer. It does not pass through Chordyx servers.
+      Apple’s system may encrypt this connection using encryption built into iOS/iPadOS/macOS.
     </p>
     <p>
       The App requests permission to use the local network so nearby sessions can be discovered.
+    </p>
+
+    <h2>Optional Internet join backup (iCloud)</h2>
+    <p>
+      If the host enables Internet backup, Chordyx can publish a short-lived session record to
+      <strong>the host’s Apple iCloud</strong> (CloudKit) so guests can join with a 6-character code
+      over cellular or when venue Wi‑Fi is unreliable. Both host and guest must be signed in to iCloud.
+      Session records are temporary join metadata and live session sync for that code — not a public Chordyx social network.
+    </p>
+    <p>
+      Chordyx does not operate a separate login system. Access is gated by Apple’s iCloud account on the device.
     </p>
 
     <h2>MIDI and audio</h2>
@@ -77,21 +91,23 @@
       If you connect a MIDI keyboard or use the in-app piano, note data is processed on your device
       and may be shared with connected session participants while a session is active.
       Metronome audio plays locally on your device.
+      If you allow microphone access for solo accompaniment features, audio is processed on your device for tempo/style detection and is not uploaded to Chordyx servers.
     </p>
 
     <h2>Information we do not collect</h2>
     <ul>
-      <li>No account registration or login is required</li>
+      <li>No Chordyx account registration or Chordyx login is required</li>
       <li>No analytics or advertising SDKs are built into the App</li>
       <li>No payment information is collected by us through the App</li>
-      <li>We do not receive your saved progressions or session content on our own servers</li>
+      <li>We do not receive your saved progressions or session content on Chordyx-operated servers</li>
     </ul>
 
     <h2>Third-party services</h2>
     <p>
       Distribution of the App through Apple’s App Store and TestFlight is subject to Apple’s
       privacy practices. We do not control Apple’s processing of data related to app downloads,
-      crash reports you choose to share with Apple, or TestFlight feedback you submit to Apple.
+      crash reports you choose to share with Apple, TestFlight feedback you submit to Apple,
+      or iCloud/CloudKit storage tied to your Apple ID when you enable those features.
     </p>
 
     <h2>Children’s privacy</h2>
@@ -106,7 +122,9 @@
       <li>You can delete saved progressions inside the App</li>
       <li>You can change or clear your display name in the App</li>
       <li>You can leave a session at any time</li>
+      <li>You can disable Internet join backup when hosting</li>
       <li>You can uninstall the App to remove locally stored data</li>
+      <li>You can manage iCloud data for the App in Apple device Settings</li>
     </ul>
 
     <h2>Changes to this policy</h2>

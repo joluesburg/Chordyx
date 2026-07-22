@@ -986,7 +986,7 @@ struct SessionView: View {
     }
 
     private var saveProgressionAlertTitle: String {
-        isSaved ? "Update Progression" : "Save Progression"
+        isSaved ? String(localized: "Update Progression") : String(localized: "Save Progression")
     }
 
     @ViewBuilder

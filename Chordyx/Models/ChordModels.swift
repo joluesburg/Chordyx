@@ -982,11 +982,37 @@ enum PianoNote {
     /// On-screen live keyboard shows the full 88-key span (scrollable on all platforms).
     static let liveKeyboardRange = keyboardRange
 
+    /// Dual-row lower board: A0 (9) … B2 (35).
+    static let lowerKeyboardRange = 9...35
+
+    /// Dual-row upper board: C3 (36) … C8 (96).
+    static let upperKeyboardRange = 36...96
+
     /// MIDI note numbers for the 88-key span (A0=21 … C8=108).
     static let keyboardMIDIRange = 21...108
 
-    /// Default scroll anchor when no notes are held (middle C).
+    /// Default scroll anchor when no notes are held (middle C / C4).
     static let middleC = 48
+
+    /// Default scroll anchor for the lower (bass) dual-row keyboard (C2).
+    static let lowerMiddleC = 24
+
+    /// Narrowest white key that stays usable for tap/click without stacking rows.
+    /// ~26pt still tracks well with a pointer; touch platforms fall back to dual-row sooner via width.
+    static let minComfortableWhiteKeyWidth: CGFloat = 26
+
+    /// Preferred white-key width when scrolling a partial viewport.
+    static let preferredWhiteKeyWidth: CGFloat = 46
+
+    static func whiteKeyCount(in range: ClosedRange<Int>) -> Int {
+        range.filter { !isBlack($0) }.count
+    }
+
+    /// True when the full note range can fit in `availableWidth` without uncomfortable key shrink.
+    static func canFitComfortably(range: ClosedRange<Int>, in availableWidth: CGFloat) -> Bool {
+        let count = max(1, whiteKeyCount(in: range))
+        return availableWidth / CGFloat(count) >= minComfortableWhiteKeyWidth
+    }
 
     /// Convert incoming value (legacy MIDI storage or internal) to internal index.
     static func normalizeToInternal(_ value: Int) -> Int {

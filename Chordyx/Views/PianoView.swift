@@ -68,7 +68,8 @@ struct PianoView: View {
 
     private var instrumentBoardHeight: CGFloat {
         if isCompactHeight { return 150 }
-        return showsFullPianoKeyboard ? 280 : 240
+        // Dual-row boards need more vertical room; fitted single-row stays classic height.
+        return showsFullPianoKeyboard ? 320 : 340
     }
 
     private var keyboardHorizontalPadding: CGFloat {
@@ -108,15 +109,16 @@ struct PianoView: View {
                     .layoutPriority(1)
                     .padding(.horizontal, 12)
                 } else {
-                    ScrollablePianoKeyboard(
+                    AdaptivePianoBoard(
                         activeNotes: activeNoteSet,
                         preferFlats: preferFlats,
                         isInteractive: isHost,
+                        isCompactHeight: isCompactHeight,
                         onTap: { viewModel.playPianoNote($0) }
                     )
                     .frame(height: instrumentBoardHeight)
                     .frame(maxWidth: .infinity)
-                    .layoutPriority(showsFullPianoKeyboard || isCompactHeight ? 1 : 0)
+                    .layoutPriority(1)
                     .padding(.horizontal, keyboardHorizontalPadding)
                 }
 
@@ -365,37 +367,138 @@ struct PianoView: View {
     }
 }
 
-/// Full 88-key piano (A0–C8). Keeps comfortable key width and scrolls for the rest.
+/// Chooses the most usable piano layout for the available width:
+/// 1) Fit all 88 keys in one row when keys stay comfortable
+/// 2) Otherwise stack C3+ above A0–B2 so each board stays reachable
+/// 3) Compact-height (landscape phone): single scrolling row
+private struct AdaptivePianoBoard: View {
+    let activeNotes: Set<Int>
+    let preferFlats: Bool
+    let isInteractive: Bool
+    let isCompactHeight: Bool
+    let onTap: (Int) -> Void
+
+    private enum Layout {
+        case fittedSingle
+        case dualRow
+        case scrollSingle
+    }
+
+    private func layout(for width: CGFloat) -> Layout {
+        if isCompactHeight { return .scrollSingle }
+        if PianoNote.canFitComfortably(range: PianoNote.keyboardRange, in: width) {
+            return .fittedSingle
+        }
+        return .dualRow
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let boardLayout = layout(for: geo.size.width)
+            switch boardLayout {
+            case .fittedSingle:
+                // Full 88-key span scaled to the viewport — no horizontal scroll.
+                PianoKeyboard(
+                    activeNotes: activeNotes,
+                    preferFlats: preferFlats,
+                    isInteractive: isInteractive,
+                    noteRange: PianoNote.keyboardRange,
+                    onTap: onTap
+                )
+                .frame(width: geo.size.width, height: geo.size.height)
+
+            case .dualRow:
+                let rowHeight = max(120, (geo.size.height - 8) / 2)
+                VStack(spacing: 8) {
+                    pianoRow(
+                        range: PianoNote.upperKeyboardRange,
+                        defaultScrollTarget: PianoNote.middleC,
+                        width: geo.size.width,
+                        height: rowHeight
+                    )
+                    pianoRow(
+                        range: PianoNote.lowerKeyboardRange,
+                        defaultScrollTarget: PianoNote.lowerMiddleC,
+                        width: geo.size.width,
+                        height: rowHeight
+                    )
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+
+            case .scrollSingle:
+                ScrollablePianoKeyboard(
+                    activeNotes: activeNotes,
+                    preferFlats: preferFlats,
+                    isInteractive: isInteractive,
+                    onTap: onTap
+                )
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pianoRow(
+        range: ClosedRange<Int>,
+        defaultScrollTarget: Int,
+        width: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        if PianoNote.canFitComfortably(range: range, in: width) {
+            PianoKeyboard(
+                activeNotes: activeNotes,
+                preferFlats: preferFlats,
+                isInteractive: isInteractive,
+                noteRange: range,
+                onTap: onTap
+            )
+            .frame(width: width, height: height)
+        } else {
+            ScrollablePianoKeyboard(
+                activeNotes: activeNotes,
+                preferFlats: preferFlats,
+                isInteractive: isInteractive,
+                noteRange: range,
+                defaultScrollTarget: defaultScrollTarget,
+                onTap: onTap
+            )
+            .frame(width: width, height: height)
+        }
+    }
+}
+
+/// Scrollable piano row. Keeps a comfortable key width and scrolls when the range is wider than the viewport.
 struct ScrollablePianoKeyboard: View {
     let activeNotes: Set<Int>
     let preferFlats: Bool
     let isInteractive: Bool
+    var noteRange: ClosedRange<Int> = PianoNote.keyboardRange
+    var defaultScrollTarget: Int = PianoNote.middleC
     let onTap: (Int) -> Void
 
-    /// Comfortable white-key width — do not shrink to fit all 88 keys on screen.
-    private let whiteKeyWidth: CGFloat = 46
-    private let noteRange = PianoNote.keyboardRange
+    private let whiteKeyWidth: CGFloat = PianoNote.preferredWhiteKeyWidth
 
     private var keyboardWidth: CGFloat {
-        let whiteCount = noteRange.filter { !PianoNote.isBlack($0) }.count
+        let whiteCount = PianoNote.whiteKeyCount(in: noteRange)
         return CGFloat(whiteCount) * whiteKeyWidth
     }
 
-    private func scrollTarget(for notes: Set<Int>) -> Int {
-        if let lowest = notes.filter({ noteRange.contains($0) }).min() {
-            return lowest
-        }
-        return PianoNote.middleC
-    }
-
     private func scrollToActiveNotes(_ proxy: ScrollViewProxy, notes: Set<Int>, animated: Bool) {
-        let target = scrollTarget(for: notes)
+        // Only follow notes that belong on this board — don't yank the other dual-row keyboard.
+        guard let target = notes.filter({ noteRange.contains($0) }).min() else { return }
         let action = { proxy.scrollTo(target, anchor: .center) }
         if animated {
             withAnimation(.easeInOut(duration: 0.25), action)
         } else {
             action()
         }
+    }
+
+    private func scrollToDefault(_ proxy: ScrollViewProxy) {
+        let target = noteRange.contains(defaultScrollTarget)
+            ? defaultScrollTarget
+            : noteRange.lowerBound
+        proxy.scrollTo(target, anchor: .center)
     }
 
     var body: some View {
@@ -409,14 +512,17 @@ struct ScrollablePianoKeyboard: View {
                         noteRange: noteRange,
                         onTap: onTap
                     )
-                    // Wide enough for all 88 keys at fixed key size; viewport shows as many as fit.
                     .frame(width: max(keyboardWidth, geo.size.width), height: geo.size.height)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .onAppear {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(100))
-                        scrollToActiveNotes(proxy, notes: activeNotes, animated: false)
+                        if activeNotes.contains(where: { noteRange.contains($0) }) {
+                            scrollToActiveNotes(proxy, notes: activeNotes, animated: false)
+                        } else {
+                            scrollToDefault(proxy)
+                        }
                     }
                 }
                 .onChange(of: activeNotes) { _, newNotes in

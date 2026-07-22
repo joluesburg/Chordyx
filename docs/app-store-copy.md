@@ -8,8 +8,8 @@ Use this document when filling App Store Connect and TestFlight notes.
 
 | Language | Line |
 |----------|------|
-| **ES** | El director lleva la progresión; la banda la sigue en vivo — sin PDFs ni cuenta en la nube. |
-| **EN** | You lead the chord progression; your band follows live — no PDFs, no cloud account. |
+| **ES** | El director lleva la progresión; la banda la sigue en vivo — sin PDFs ni cuenta de Chordyx. |
+| **EN** | You lead the chord progression; your band follows live — no PDFs, no Chordyx account. |
 
 ---
 
@@ -55,13 +55,13 @@ Chordyx is built for the moment on stage — when you lead and the band needs to
 • **Practice solo** — rehearse with the ring and metronome  
 
 **Built for:**
-Worship leaders, small bands, and keyboardists who want direct control during rehearsal or service — without setting up Planning Center or a cloud library.
+Worship leaders, small bands, and keyboardists who want direct control during rehearsal or service — without depending on a cloud chart library as the primary workflow.
 
 **Requirements:**
-Two or more Apple devices on the same local network for host/guest sessions. Local Network permission is required for discovery.
+Two or more Apple devices on the same local network for host/guest sessions. Local Network permission is required for discovery. Optional Internet join codes require iCloud sign-in on both devices.
 
 **Privacy:**
-Sessions are peer-to-peer on your local network. We do not run a cloud service or sell your data. See our privacy policy on the support URL.
+Sessions are primarily peer-to-peer on your local network. Optional Internet join backup uses your Apple iCloud (CloudKit). We do not sell your data and do not require a Chordyx account. See our privacy policy on the support URL.
 
 ---
 
@@ -83,10 +83,10 @@ Chordyx está hecho para el momento en escenario — cuando tú diriges y la ban
 • **Práctica solo** — ensaya con anillo y metrónomo  
 
 **Para quién:**
-Líderes de alabanza, bandas pequeñas y tecladistas que quieren control directo en ensayo o servicio — sin montar Planning Center ni biblioteca en la nube.
+Líderes de alabanza, bandas pequeñas y tecladistas que quieren control directo en ensayo o servicio — sin depender de una biblioteca en la nube como flujo principal.
 
 **Requisitos:**
-Dos o más dispositivos Apple en la misma red local. Se necesita permiso de Red local para descubrir sesiones.
+Dos o más dispositivos Apple en la misma red local. Se necesita permiso de Red local para descubrir sesiones. Los códigos de unión por Internet opcionales requieren iCloud en ambos dispositivos.
 
 ---
 
@@ -119,7 +119,7 @@ To test:
 
 Local Network permission is required for Bonjour discovery (_chordyx._tcp).
 
-No login, no server backend. Optional song import fetches public web pages user provides.
+No Chordyx login. Sessions are primarily peer-to-peer on the local network. Optional Internet join codes use the user’s Apple iCloud (CloudKit). Optional song import fetches public web pages the user provides.
 
 Contact: joluesburg@gmail.com
 ```
