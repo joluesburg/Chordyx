@@ -1385,18 +1385,9 @@ final class SessionViewModel {
         role = .host
         isInSession = true
         metronome.stop()
-        beginHostingSession(named: name)
-        pushWatchUpdate()
-        activateSessionBackgroundServices()
-        if autoDetectKey {
-            startPeriodicKeyReviewIfNeeded()
-            // Defer mic open until session UI is up — avoids AVAudio + view-transition races.
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(350))
-                guard self.isInSession, self.payload.autoDetectKey else { return }
-                self.refreshAudioKeyAssistPolicy()
-            }
-        }
+        // Present Session UI first; Multipeer / Live Activity / audio after the cover settles
+        // so iPhone doesn't freeze on com.apple.main-thread during transition.
+        schedulePostHostActivation(named: name, autoDetectKey: autoDetectKey)
     }
 
     /// Host a freestyle session — guests see only the current live chord (piano/MIDI), with no next-chord preview.
@@ -1428,13 +1419,28 @@ final class SessionViewModel {
         role = .host
         isInSession = true
         metronome.stop()
-        beginHostingSession(named: name)
+        schedulePostHostActivation(named: name, autoDetectKey: autoDetectKey)
+    }
+
+    /// Finish hosting work after SwiftUI has a chance to present SessionView.
+    private func schedulePostHostActivation(named name: String, autoDetectKey: Bool) {
         pushWatchUpdate()
-        activateSessionBackgroundServices()
-        if autoDetectKey {
-            startPeriodicKeyReviewIfNeeded()
-            Task { @MainActor in
+        Task { @MainActor [weak self] in
+            #if os(iOS)
+            try? await Task.sleep(for: .milliseconds(350))
+            #else
+            try? await Task.sleep(for: .milliseconds(120))
+            #endif
+            guard let self, self.isInSession, self.role == .host else { return }
+            self.beginHostingSession(named: name)
+            self.activateSessionBackgroundServices()
+            if autoDetectKey {
+                self.startPeriodicKeyReviewIfNeeded()
+                #if os(iOS)
+                try? await Task.sleep(for: .milliseconds(500))
+                #else
                 try? await Task.sleep(for: .milliseconds(350))
+                #endif
                 guard self.isInSession, self.payload.autoDetectKey else { return }
                 self.refreshAudioKeyAssistPolicy()
             }

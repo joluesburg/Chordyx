@@ -55,9 +55,17 @@ final class AudioPerformanceAnalyzer {
         capture.selectDevice(device?.id)
     }
 
-    func startListening() {
-        refreshDevices()
+    func startListening() async {
         lastError = nil
+        #if os(iOS)
+        let granted = await Self.requestMicrophonePermission()
+        guard granted else {
+            lastError = String(localized: "Microphone access is required for audio key assist.")
+            isListening = false
+            return
+        }
+        #endif
+        refreshDevices()
         capture.onBuffer = { [weak self] buffer, time in
             self?.process(buffer: buffer, at: time)
         }
@@ -70,6 +78,19 @@ final class AudioPerformanceAnalyzer {
             isListening = false
         }
     }
+
+    #if os(iOS)
+    private static func requestMicrophonePermission() async -> Bool {
+        if #available(iOS 17.0, *) {
+            return await AVAudioApplication.requestRecordPermission()
+        }
+        return await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+    #endif
 
     func stopListening() {
         capture.stop()

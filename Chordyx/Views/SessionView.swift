@@ -517,7 +517,17 @@ struct SessionView: View {
         sessionLayout
             .onAppear(perform: configureSessionOnAppear)
             .onChange(of: viewModel.isInSession) { _, inSession in
-                if inSession { presentPreServiceChecklistIfNeeded() }
+                if inSession {
+                    Task { @MainActor in
+                        #if os(iOS)
+                        try? await Task.sleep(for: .milliseconds(1200))
+                        #else
+                        try? await Task.sleep(for: .milliseconds(450))
+                        #endif
+                        guard viewModel.isInSession else { return }
+                        presentPreServiceChecklistIfNeeded()
+                    }
+                }
             }
             .onChange(of: guestMetronomeAudioEnabled) { _, enabled in
                 if isGuest { viewModel.setGuestMetronomeAudioEnabled(enabled) }
@@ -554,7 +564,16 @@ struct SessionView: View {
             viewModel.refreshMetronomeAudioPolicy()
             viewModel.prepareAutoKeyDetection(libraryStore: store)
         }
-        presentPreServiceChecklistIfNeeded()
+        // Defer checklist so it doesn't present during session / permission transitions.
+        Task { @MainActor in
+            #if os(iOS)
+            try? await Task.sleep(for: .milliseconds(1200))
+            #else
+            try? await Task.sleep(for: .milliseconds(450))
+            #endif
+            guard viewModel.isInSession else { return }
+            presentPreServiceChecklistIfNeeded()
+        }
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {

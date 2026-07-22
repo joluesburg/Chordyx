@@ -35,7 +35,8 @@ enum LocalNetworkPermission {
 
             browser.start(queue: .global(qos: .userInitiated))
 
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.5) {
+            // Keep this short — long waits on older code paths starved the UI.
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.5) {
                 browser.cancel()
                 finish()
             }

@@ -43,6 +43,22 @@ struct HomeView: View {
     }
 
     var body: some View {
+        Group {
+            #if os(macOS)
+            // Mac: Session as window root — nested Host Setup + Session sheets freeze hit-testing.
+            if viewModel.isInSession {
+                SessionView(viewModel: viewModel, store: store)
+                    .preferredColorScheme(.dark)
+            } else {
+                homeNavigationStack
+            }
+            #else
+            homeNavigationStack
+            #endif
+        }
+    }
+
+    private var homeNavigationStack: some View {
         NavigationStack {
             ZStack {
                 AppTheme.backgroundGradient.ignoresSafeArea()
@@ -135,12 +151,14 @@ struct HomeView: View {
             .platformHomeCover(isPresented: $showSetlistPicker) {
                 SetlistPickerView(store: store, viewModel: viewModel)
             }
+            #if !os(macOS)
             .platformFullScreenCover(isPresented: Binding(
                 get: { viewModel.isInSession },
                 set: { _ in }
             )) {
                 SessionView(viewModel: viewModel, store: store)
             }
+            #endif
         }
         .preferredColorScheme(.dark)
     }
@@ -567,7 +585,11 @@ struct HostSetupView: View {
         dismiss()
 
         Task { @MainActor in
+            #if os(macOS)
+            try? await Task.sleep(for: .milliseconds(280))
+            #else
             try? await Task.sleep(for: .milliseconds(150))
+            #endif
             let resolvedName = name.isEmpty ? L10n.jamSession : name
             switch kind {
             case .progression:

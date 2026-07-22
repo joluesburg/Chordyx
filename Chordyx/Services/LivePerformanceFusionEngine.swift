@@ -100,10 +100,13 @@ final class LivePerformanceFusionEngine {
     }
 
     func startAudioAI() {
-        audioAnalyzer.startListening()
-        isAudioListening = audioAnalyzer.isListening
-        audioLastError = audioAnalyzer.lastError
-        fuse()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.audioAnalyzer.startListening()
+            self.isAudioListening = self.audioAnalyzer.isListening
+            self.audioLastError = self.audioAnalyzer.lastError
+            self.fuse()
+        }
     }
 
     func stopAudioAI() {
@@ -123,11 +126,16 @@ final class LivePerformanceFusionEngine {
     func setAudioKeyAssistEnabled(_ enabled: Bool) {
         keyAssistRequested = enabled
         if enabled {
-            if !audioAnalyzer.isListening {
-                audioAnalyzer.startListening()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !self.audioAnalyzer.isListening {
+                    await self.audioAnalyzer.startListening()
+                }
+                self.isAudioListening = self.audioAnalyzer.isListening
+                self.audioLastError = self.audioAnalyzer.lastError
+                self.fuse()
             }
-            isAudioListening = audioAnalyzer.isListening
-            audioLastError = audioAnalyzer.lastError
+            return
         }
         fuse()
     }

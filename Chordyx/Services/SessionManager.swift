@@ -80,9 +80,14 @@ final class SessionManager: NSObject {
         hostingTempoBPM = tempoBPM
         hostingSessionToken = sessionToken
         lastError = nil
-        Task { @MainActor in
-            await LocalNetworkPermission.requestAccess(serviceType: Self.serviceType)
-            beginHosting(sessionName: safeName)
+        // Detached: Local Network permission must not run under MainActor or iPhone UI freezes
+        // (Xcode shows "Task … Queue : com.apple.main-thread").
+        let serviceType = Self.serviceType
+        Task.detached(priority: .userInitiated) { [weak self, safeName] in
+            await LocalNetworkPermission.requestAccess(serviceType: serviceType)
+            await MainActor.run {
+                self?.beginHosting(sessionName: safeName)
+            }
         }
     }
 
@@ -97,9 +102,12 @@ final class SessionManager: NSObject {
 
     func startBrowsing() {
         lastError = nil
-        Task { @MainActor in
-            await LocalNetworkPermission.requestAccess(serviceType: Self.serviceType)
-            beginBrowsing()
+        let serviceType = Self.serviceType
+        Task.detached(priority: .userInitiated) { [weak self] in
+            await LocalNetworkPermission.requestAccess(serviceType: serviceType)
+            await MainActor.run {
+                self?.beginBrowsing()
+            }
         }
     }
 
