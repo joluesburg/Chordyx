@@ -284,11 +284,11 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
     }
 
     #if os(macOS)
-    /// Prefer a wide sheet so all 88 keys can fit in one row; grows taller if dual-row is needed.
+    /// Room for one natural keyboard, or two stacked boards when bass + treble sound together.
     private var macPianoSheetBody: some View {
         sheetContent()
-            .frame(minWidth: 1400, idealWidth: .infinity, maxWidth: .infinity,
-                   minHeight: 520, idealHeight: 640, maxHeight: 760)
+            .frame(minWidth: 1100, idealWidth: 1280, maxWidth: .infinity,
+                   minHeight: 420, idealHeight: 560, maxHeight: 720)
             .background(AppTheme.backgroundGradient.ignoresSafeArea())
             .platformDesktopControls()
     }

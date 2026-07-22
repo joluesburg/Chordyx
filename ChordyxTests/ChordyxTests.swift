@@ -95,6 +95,22 @@ struct TwoHandChordRecognitionTests {
         #expect(symbol == "G")
     }
 
+    @Test func leftHandAOctavesPlusRightHandAm7IsMinor() {
+        // LH La octaves A1–A2 (21, 33), RH Am7 A3–C4–E4–G4 (45, 48, 52, 55)
+        let notes = [21, 33, 45, 48, 52, 55]
+        let symbol = ChordRecognizer.symbolConsideringBothHands(notes: notes, preferFlats: false)
+        #expect(symbol == "Am7" || symbol == "Am")
+        #expect(ChordTheory.beginnerTriadSymbol(for: symbol ?? "", preferFlats: false) == "Am")
+    }
+
+    @Test func leftHandAPlusRightHandCEGIsAmNotAMajor() {
+        // Common Am7 voicing: LH root A2 (33), RH upper structure C4–E4–G4 (48, 52, 55)
+        let notes = [33, 48, 52, 55]
+        let symbol = ChordRecognizer.symbolConsideringBothHands(notes: notes, preferFlats: false)
+        #expect(symbol == "Am7" || symbol == "Am")
+        #expect(ChordTheory.beginnerTriadSymbol(for: symbol ?? "", preferFlats: false) == "Am")
+    }
+
     @Test func beginnerTriadAnchorsNearRightHand() {
         let host = [31, 41, 45, 48] // G2 + F major in treble
         let notes = ChordTheory.beginnerTriadNotes(from: host, symbol: "G")

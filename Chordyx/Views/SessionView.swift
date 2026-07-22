@@ -846,10 +846,11 @@ struct SessionView: View {
                 )
             }
             .onChange(of: viewModel.payload.isPianoActive) { _, isActive in
-                if !isActive { showPianoOverlay = false }
+                // Host overlay tracks share state; guests keep Piano Keys open independently.
+                if isHost, !isActive { showPianoOverlay = false }
             }
             .onChange(of: viewModel.payload.isFretboardActive) { _, isActive in
-                if !isActive { showFretboardOverlay = false }
+                if isHost, !isActive { showFretboardOverlay = false }
             }
             .onChange(of: viewModel.payload.ringShowsLiveChords) { _, showsLive in
                 if isGuest {
@@ -2683,6 +2684,18 @@ struct SessionView: View {
 
                 leaveSessionButton(style: .prominent)
             }
+
+            Button {
+                showPianoOverlay = true
+            } label: {
+                Label(String(localized: "Piano Keys"), systemImage: "pianokeys")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
         }
         .padding(.horizontal, sessionHorizontalPadding)
         .padding(.top, 4)
@@ -2789,18 +2802,16 @@ struct SessionView: View {
             .background(AppTheme.surfaceElevated)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            if hostSharingPiano {
-                Button {
-                    showPianoOverlay = true
-                } label: {
-                    Label("View Piano", systemImage: "pianokeys")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(AppTheme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
+            Button {
+                showPianoOverlay = true
+            } label: {
+                Label(String(localized: "Piano Keys"), systemImage: "pianokeys")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AppTheme.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             if viewModel.payload.isFretboardActive {

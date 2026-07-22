@@ -1076,6 +1076,7 @@ enum ChordRecognizer {
 
     /// Learns from both hands: LH chord or bass root + RH quality.
     /// Example: LH Sol (G) + RH Fa major → `G` for beginner/live labeling.
+    /// Example: LH La octaves + RH Am7 (or C–E–G over A) → `Am`, not `A`.
     static func symbolConsideringBothHands(
         notes: [Int],
         preferFlats: Bool
@@ -1085,10 +1086,6 @@ enum ChordRecognizer {
             .filter { PianoNote.keyboardRange.contains($0) }
             .sorted()
         guard !normalized.isEmpty else { return nil }
-
-        if let remembered = TwoHandChordMemory.shared.recall(notes: normalized) {
-            return remembered
-        }
 
         let split = handSplitIndex
         let left = normalized.filter { $0 < split }
@@ -1101,17 +1098,50 @@ enum ChordRecognizer {
 
         let leftSymbol = symbol(forPitchClasses: leftPCs, bassPitchClass: leftBass, preferFlats: preferFlats)
         let rightSymbol = symbol(forPitchClasses: rightPCs, bassPitchClass: rightBass, preferFlats: preferFlats)
+        let allPCs = Set(normalized.map { PianoNote.pitchClass(of: $0) })
+        let overallBass = normalized.min().map { PianoNote.pitchClass(of: $0) }
+        let combinedSymbol = symbol(
+            forPitchClasses: allPCs,
+            bassPitchClass: overallBass,
+            preferFlats: preferFlats
+        )
+
+        // Lower board through B3 — catches LH triads whose top note sits just above C3 (e.g. D3).
+        let lowerRegister = normalized.filter { $0 < PianoNote.middleC }
+        let lowerPCs = Set(lowerRegister.map { PianoNote.pitchClass(of: $0) })
+        let lowerBass = lowerRegister.min().map { PianoNote.pitchClass(of: $0) }
+        let lowerSymbol = symbol(
+            forPitchClasses: lowerPCs,
+            bassPitchClass: lowerBass,
+            preferFlats: preferFlats
+        )
 
         let resolved: String?
-        // 1) Full left-hand chord (e.g. G–B–D) wins over a competing right-hand triad.
+        // 1) Full left-hand chord below C3 (e.g. G–B–D with D below C3).
         if let leftSymbol, leftPCs.count >= 3 {
             resolved = stripSlashBass(leftSymbol)
         }
-        // 2) Left-hand bass/root + right-hand major/minor color → root from LH, quality from RH.
+        // 1b) Full triad in the lower register (< C4), even if the 5th sits on D3/E3.
+        else if let lowerSymbol,
+                lowerPCs.count >= 3,
+                ChordTheory.beginnerMajorMinorTriad(for: lowerSymbol) != nil {
+            resolved = stripSlashBass(lowerSymbol)
+        }
+        // 2) Sparse LH (octaves/root) + combined chord rooted on that bass → keep quality.
+        //    La+La + Am7 / C–E–G → Am7 (beginner shows Am), never plain A major.
+        else if leftPCs.count <= 2,
+                let leftBass,
+                let combinedSymbol,
+                let combinedTriad = ChordTheory.beginnerMajorMinorTriad(for: combinedSymbol),
+                combinedTriad.root == leftBass {
+            resolved = stripSlashBass(combinedSymbol)
+        }
+        // 3) LH bass + different RH maj/min color → root from LH, quality from RH.
         //    Sol in LH + Fa major in RH → G (not F).
         else if let leftBass,
                 let rightSymbol,
-                let rhTriad = ChordTheory.beginnerMajorMinorTriad(for: rightSymbol) {
+                let rhTriad = ChordTheory.beginnerMajorMinorTriad(for: rightSymbol),
+                rhTriad.root != leftBass {
             let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
             resolved = rhTriad.isMinor ? names[leftBass] + "m" : names[leftBass]
         } else if let rightSymbol {
@@ -1119,19 +1149,19 @@ enum ChordRecognizer {
         } else if let leftSymbol {
             resolved = stripSlashBass(leftSymbol)
         } else {
-            let allPCs = Set(normalized.map { PianoNote.pitchClass(of: $0) })
-            let bass = normalized.min().map { PianoNote.pitchClass(of: $0) }
-            resolved = symbol(forPitchClasses: allPCs, bassPitchClass: bass, preferFlats: preferFlats)
-                .map(stripSlashBass)
+            resolved = combinedSymbol.map { stripSlashBass($0) }
         }
 
         if let resolved {
             TwoHandChordMemory.shared.remember(notes: normalized, symbol: resolved)
+        } else if let remembered = TwoHandChordMemory.shared.recall(notes: normalized) {
+            return remembered
         }
         return resolved
     }
 
-    private static func stripSlashBass(_ symbol: String) -> String {
+    /// Pure string helper — safe outside the main actor (Swift 6 Optional.map).
+    nonisolated private static func stripSlashBass(_ symbol: String) -> String {
         symbol.split(separator: "/").first.map(String.init) ?? symbol
     }
 }
@@ -1174,12 +1204,13 @@ final class TwoHandChordMemory: @unchecked Sendable {
     }
 
     private func fingerprint(_ notes: [Int]) -> String {
+        // v2: corrected sparse-LH + combined quality (Am over A octaves, not A major).
         let split = ChordRecognizer.handSplitIndex
         let left = Set(notes.filter { $0 < split }.map { PianoNote.pitchClass(of: $0) }).sorted()
         let right = Set(notes.filter { $0 >= split }.map { PianoNote.pitchClass(of: $0) }).sorted()
         let leftPart = left.map(String.init).joined(separator: ",")
         let rightPart = right.map(String.init).joined(separator: ",")
-        return "L\(leftPart)|R\(rightPart)"
+        return "v2|L\(leftPart)|R\(rightPart)"
     }
 }
 
