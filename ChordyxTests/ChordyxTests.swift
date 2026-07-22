@@ -29,6 +29,112 @@ struct KeyDetectorTests {
     }
 }
 
+struct LibraryKeyMatchTests {
+
+    @Test func matchesSavedProgressionAbsoluteKey() {
+        let library = [(name: "Sunday", key: MusicalKey.G, symbols: ["G", "D", "Em", "C"])]
+        let match = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: ["G", "D", "Em", "C", "G"],
+            library: library
+        )
+        #expect(match?.key == .G)
+        #expect((match?.similarity ?? 0) >= 0.58)
+    }
+
+    @Test func matchesTransposedLibraryProgressionToLiveKey() {
+        // Library in C; live plays the same relative progression in G.
+        let library = [(name: "Pop", key: MusicalKey.C, symbols: ["C", "G", "Am", "F"])]
+        let match = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: ["G", "D", "Em", "C"],
+            library: library
+        )
+        #expect(match?.key == .G)
+        #expect((match?.similarity ?? 0) >= 0.58)
+    }
+
+    @Test func ignoresUnrelatedProgressions() {
+        let library = [(name: "Blues", key: MusicalKey.A, symbols: ["A7", "D7", "E7"])]
+        let match = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: ["C", "G", "Am", "F"],
+            library: library
+        )
+        #expect(match == nil || (match?.similarity ?? 1) < 0.58)
+    }
+}
+
+struct LiveKeyIntelligenceTests {
+
+    @Test func detectsPopProgressionInC() {
+        let result = LiveKeyIntelligence.detect(from: ["C", "G", "Am", "F", "C"])
+        #expect(result?.key == .C)
+        #expect((result?.confidence ?? 0) > 0.12)
+    }
+
+    @Test func detectsWorshipProgressionInG() {
+        let result = LiveKeyIntelligence.detect(from: ["G", "D", "Em", "C", "G"])
+        #expect(result?.key == .G)
+    }
+
+    @Test func detectsTwoFiveOneInF() {
+        let result = LiveKeyIntelligence.detect(from: ["Gm", "C7", "F", "F"])
+        #expect(result?.key == .F)
+    }
+
+    @Test func reportsMIRContributors() {
+        let breakdown = LiveKeyIntelligence.analyze(symbols: ["D", "A", "Bm", "G"])
+        #expect(breakdown?.bestKey == .D)
+        #expect((breakdown?.contributors.count ?? 0) >= 5)
+    }
+
+    @Test func needsAtLeastThreeChords() {
+        #expect(LiveKeyIntelligence.detect(from: ["C", "G"]) == nil)
+    }
+}
+
+#if os(macOS) || os(iOS)
+struct AudioChromaKeyEstimatorTests {
+
+    @Test func estimatesCFromMajorTriadChroma() {
+        let estimator = AudioChromaKeyEstimator()
+        // Sparse C-major template (tonic / third / fifth only).
+        var frame = [Float](repeating: 0, count: 12)
+        frame[0] = 1.0   // C
+        frame[4] = 0.7   // E
+        frame[7] = 0.85  // G
+        for _ in 0..<32 {
+            estimator.ingest(frameChroma: frame, rms: 0.05)
+        }
+        let estimate = estimator.estimate()
+        #expect(estimate?.key == .C)
+        #expect((estimate?.confidence ?? 0) > 0.08)
+    }
+
+    @Test func estimatesGFromDominantFamilyChroma() {
+        let estimator = AudioChromaKeyEstimator()
+        var frame = [Float](repeating: 0, count: 12)
+        frame[7] = 1.0   // G
+        frame[11] = 0.65 // B
+        frame[2] = 0.8   // D
+        for _ in 0..<32 {
+            estimator.ingest(frameChroma: frame, rms: 0.05)
+        }
+        let estimate = estimator.estimate()
+        #expect(estimate?.key == .G)
+        #expect((estimate?.confidence ?? 0) > 0.08)
+    }
+
+    @Test func ignoresSilence() {
+        let estimator = AudioChromaKeyEstimator()
+        var frame = [Float](repeating: 0, count: 12)
+        frame[0] = 1
+        for _ in 0..<24 {
+            estimator.ingest(frameChroma: frame, rms: 0.001)
+        }
+        #expect(estimator.estimate() == nil)
+    }
+}
+#endif
+
 struct BeginnerPianoTriadTests {
 
     @Test func maj9CollapsesToMajorTriadSymbol() {

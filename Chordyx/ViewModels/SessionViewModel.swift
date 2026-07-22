@@ -97,6 +97,14 @@ final class SessionViewModel {
     private var pendingDetectedKeyHits = 0
     private var symbolsAtLastAutoKeyDetection: [String] = []
     private var keyUsedForAutoDetection: MusicalKey?
+    private var keyReviewTask: Task<Void, Never>?
+    private var lastPeriodicKeyReviewAt: TimeInterval = 0
+    private var lastAutoKeyConfidence: Double = 0
+    private var lastAudioKeyDetectAttemptAt: TimeInterval = 0
+    /// Adaptive re-score while Auto key is on (tightens when uncertain).
+    private static let keyReviewIntervalFastSeconds: TimeInterval = 6
+    private static let keyReviewIntervalNormalSeconds: TimeInterval = 10
+    private static let keyReviewIntervalStableSeconds: TimeInterval = 15
     private let progressionInference = ProgressionInferenceEngine()
     /// True after a repeating live loop was auto-applied to `payload.chords`.
     var hasInferredLiveProgression: Bool {
@@ -469,6 +477,7 @@ final class SessionViewModel {
         #if os(macOS) || os(iOS)
         livePerformanceFusion.onFusionUpdated = { [weak self] in
             guard let self else { return }
+            self.ingestAudioKeyHintFromFusion()
             self.syncHostLiveGrooveToPayload(force: false)
             self.evaluateSoloAccompanimentFromFusion()
         }
@@ -985,18 +994,80 @@ final class SessionViewModel {
         if let live = payload.liveChordSymbol, !LiveRing.contains(live, in: symbols) {
             symbols.append(live)
         }
+        // Prefer a longer recent window so HMM / templates see phrase context.
+        if symbols.count > 24 {
+            symbols = Array(symbols.suffix(24))
+        }
         return symbols
     }
 
-    private func maybeAutoDetectKey() {
+    /// Feed the Adaptive key AI with saved progressions so live sequences can lock the correct key.
+    func refreshLibraryKeyHints(from store: ProgressionStore) {
+        let hints = store.progressions.compactMap { progression -> LibraryKeyHint? in
+            let symbols = progression.chords.map(\.symbolName).filter { !$0.isEmpty }
+            guard symbols.count >= 3 else { return nil }
+            return LibraryKeyHint(name: progression.name, key: progression.key, symbols: symbols)
+        }
+        AdaptiveKeyLearningEngine.shared.updateLibraryHints(hints)
+    }
+
+    /// Host: refresh library fingerprints and keep the periodic Auto-key reviewer running.
+    func prepareAutoKeyDetection(libraryStore: ProgressionStore) {
+        refreshLibraryKeyHints(from: libraryStore)
+        if payload.autoDetectKey {
+            startPeriodicKeyReviewIfNeeded()
+            refreshAudioKeyAssistPolicy()
+        }
+    }
+
+    /// Open mic for chroma key when Auto-key is on (independent of Solo drums Audio AI).
+    func refreshAudioKeyAssistPolicy() {
+        #if os(macOS) || os(iOS)
+        guard canDriveSession, isInSession, payload.autoDetectKey else {
+            livePerformanceFusion.setAudioKeyAssistEnabled(false)
+            AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+            // Stop only when nothing else needs the mic; Solo path may restart it.
+            if !livePerformanceFusion.isAudioListening {
+                return
+            }
+            // Leave capture running if Solo Audio AI still owns it.
+            return
+        }
+        livePerformanceFusion.setAudioKeyAssistEnabled(true)
+        if !livePerformanceFusion.isAudioListening {
+            livePerformanceFusion.startAudioAI()
+        }
+        #endif
+    }
+
+    private func ingestAudioKeyHintFromFusion() {
+        #if os(macOS) || os(iOS)
+        guard payload.autoDetectKey, canDriveSession else { return }
+        guard let key = livePerformanceFusion.estimatedAudioKey else { return }
+        AdaptiveKeyLearningEngine.shared.updateAudioKeyHint(
+            key: key,
+            confidence: livePerformanceFusion.audioKeyConfidence,
+            scores: livePerformanceFusion.audioKeyScores
+        )
+        // Soft re-check when audio locks a key before enough chords land (throttled).
+        guard livePerformanceFusion.audioKeyConfidence >= 0.42 else { return }
+        let now = Date().timeIntervalSince1970
+        guard now - lastAudioKeyDetectAttemptAt >= 2.5 else { return }
+        lastAudioKeyDetectAttemptAt = now
+        maybeAutoDetectKey()
+        #endif
+    }
+
+    private func maybeAutoDetectKey(forcePeriodicReview: Bool = false) {
         guard payload.autoDetectKey, canDriveSession else { return }
 
         let symbols = liveRingSymbolsForKeyDetection()
-        guard symbols.count >= 3,
-              let result = AdaptiveKeyLearningEngine.shared.detect(
-                from: symbols,
-                sessionName: payload.sessionName
-              ) else { return }
+        guard let result = AdaptiveKeyLearningEngine.shared.detect(
+            from: symbols,
+            sessionName: payload.sessionName
+        ) else { return }
+
+        lastAutoKeyConfidence = result.confidence
 
         if result.key == payload.key {
             pendingDetectedKey = nil
@@ -1007,6 +1078,15 @@ final class SessionViewModel {
             return
         }
 
+        // Periodic reviews require stronger evidence before changing an already-locked Auto key.
+        if forcePeriodicReview, payload.isKeyAutoDetected {
+            let strongEnough = result.source == .library
+                || result.source == .memory
+                || (result.source == .audio && result.confidence >= 0.5)
+                || result.confidence >= 0.55
+            guard strongEnough else { return }
+        }
+
         if result.key == pendingDetectedKey {
             pendingDetectedKeyHits += 1
         } else {
@@ -1015,27 +1095,37 @@ final class SessionViewModel {
         }
 
         let isInitialGuess = payload.liveRingRecentOrder.count <= 4 && !payload.isKeyAutoDetected
-        let memoryConfirmed = result.source == .memory
+        let trustedSource = result.source == .memory
+            || result.source == .library
+            || (result.source == .audio && result.confidence >= 0.45)
         let requiredHits: Int
-        if memoryConfirmed {
-            requiredHits = 1
+        if trustedSource {
+            requiredHits = forcePeriodicReview && payload.isKeyAutoDetected ? 2 : 1
         } else if isInitialGuess {
             requiredHits = 1
         } else if result.confidence >= 0.5 {
-            requiredHits = 2
+            requiredHits = forcePeriodicReview ? 2 : 2
         } else {
-            requiredHits = 3
+            requiredHits = forcePeriodicReview ? 3 : 3
         }
         guard pendingDetectedKeyHits >= requiredHits else { return }
 
-        applyAutoDetectedKeyChange(to: result.key, from: symbols)
+        applyAutoDetectedKeyChange(
+            to: result.key,
+            from: symbols,
+            preserveLiveRing: forcePeriodicReview && payload.isKeyAutoDetected
+        )
     }
 
-    private func applyAutoDetectedKeyChange(to newKey: MusicalKey, from symbols: [String]) {
+    private func applyAutoDetectedKeyChange(
+        to newKey: MusicalKey,
+        from symbols: [String],
+        preserveLiveRing: Bool = false
+    ) {
         let keyChanged = newKey.pitchClass != payload.key.pitchClass
         let hadLiveRing = !payload.freestyleChordSymbols.isEmpty || !payload.liveRingUsageCounts.isEmpty
 
-        if keyChanged, hadLiveRing, usesLiveFreestyleRing {
+        if keyChanged, hadLiveRing, usesLiveFreestyleRing, !preserveLiveRing {
             beginNewLiveRingSegment()
             clearInferredLiveProgression(resetEngine: true)
             if isLiveProgressionSession {
@@ -1058,6 +1148,61 @@ final class SessionViewModel {
             sessionName: payload.sessionName
         )
         sync()
+    }
+
+    private func startPeriodicKeyReviewIfNeeded() {
+        keyReviewTask?.cancel()
+        guard payload.autoDetectKey, canDriveSession, isInSession else {
+            keyReviewTask = nil
+            return
+        }
+        keyReviewTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let interval = self.adaptiveKeyReviewIntervalSeconds()
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled else { return }
+                self.reviewLiveKeyPeriodically()
+            }
+        }
+    }
+
+    /// Faster reviews until Auto key locks with solid confidence; slower once stable.
+    private func adaptiveKeyReviewIntervalSeconds() -> TimeInterval {
+        if !payload.isKeyAutoDetected {
+            return Self.keyReviewIntervalFastSeconds
+        }
+        if lastAutoKeyConfidence < 0.35 {
+            return Self.keyReviewIntervalFastSeconds
+        }
+        if lastAutoKeyConfidence < 0.55 {
+            return Self.keyReviewIntervalNormalSeconds
+        }
+        return Self.keyReviewIntervalStableSeconds
+    }
+
+    private func stopPeriodicKeyReview() {
+        keyReviewTask?.cancel()
+        keyReviewTask = nil
+        lastPeriodicKeyReviewAt = 0
+    }
+
+    private func reviewLiveKeyPeriodically() {
+        guard payload.autoDetectKey, canDriveSession, isInSession else {
+            stopPeriodicKeyReview()
+            return
+        }
+        let symbols = liveRingSymbolsForKeyDetection()
+        guard symbols.count >= 3 else { return }
+
+        // Skip if nothing new since the last applied detection.
+        if symbols == symbolsAtLastAutoKeyDetection, payload.isKeyAutoDetected {
+            return
+        }
+
+        let now = Date().timeIntervalSince1970
+        lastPeriodicKeyReviewAt = now
+        maybeAutoDetectKey(forcePeriodicReview: true)
     }
 
     private func maybeInferLiveProgression(symbol: String) {
@@ -1105,6 +1250,10 @@ final class SessionViewModel {
         inferredOutOfCycleHits = 0
         updateActiveSection()
         sync()
+        // Stable loop known — re-score key against library + theory.
+        if payload.autoDetectKey {
+            maybeAutoDetectKey(forcePeriodicReview: true)
+        }
     }
 
     private func advanceInferredProgression(with symbol: String) {
@@ -1234,6 +1383,10 @@ final class SessionViewModel {
         beginHostingSession(named: name)
         pushWatchUpdate()
         activateSessionBackgroundServices()
+        if autoDetectKey {
+            startPeriodicKeyReviewIfNeeded()
+            refreshAudioKeyAssistPolicy()
+        }
     }
 
     /// Host a freestyle session — guests see only the current live chord (piano/MIDI), with no next-chord preview.
@@ -1268,6 +1421,10 @@ final class SessionViewModel {
         beginHostingSession(named: name)
         pushWatchUpdate()
         activateSessionBackgroundServices()
+        if autoDetectKey {
+            startPeriodicKeyReviewIfNeeded()
+            refreshAudioKeyAssistPolicy()
+        }
     }
 
     func hostSession(from saved: SavedProgression, importGuide: ImportSessionGuide? = nil) {
@@ -1839,10 +1996,17 @@ final class SessionViewModel {
         payload.autoDetectKey = enabled
         if enabled {
             maybeAutoDetectKey()
+            startPeriodicKeyReviewIfNeeded()
+            refreshAudioKeyAssistPolicy()
         } else {
             payload.isKeyAutoDetected = false
             pendingDetectedKey = nil
             pendingDetectedKeyHits = 0
+            stopPeriodicKeyReview()
+            #if os(macOS) || os(iOS)
+            livePerformanceFusion.setAudioKeyAssistEnabled(false)
+            AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+            #endif
         }
         sync()
     }
@@ -2554,6 +2718,11 @@ final class SessionViewModel {
         liveChordSymbolClearTask = nil
         pianoNotesSyncTask?.cancel()
         pianoNotesSyncTask = nil
+        stopPeriodicKeyReview()
+        #if os(macOS) || os(iOS)
+        livePerformanceFusion.setAudioKeyAssistEnabled(false)
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+        #endif
         lastSyncedPianoNotes = []
         cueClearTask?.cancel()
         cueClearTask = nil

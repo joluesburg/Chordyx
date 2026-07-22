@@ -552,6 +552,7 @@ struct SessionView: View {
             showLiveChordsOnRing = viewModel.payload.ringShowsLiveChords
         } else {
             viewModel.refreshMetronomeAudioPolicy()
+            viewModel.prepareAutoKeyDetection(libraryStore: store)
         }
         presentPreServiceChecklistIfNeeded()
     }
@@ -1358,8 +1359,14 @@ struct SessionView: View {
 
     @ViewBuilder
     private func guestLiveViewStyleControls(includeRingSource: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            GuestLiveViewStylePicker(nowOnly: $guestLiveNowOnly)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                GuestLiveViewStylePicker(nowOnly: $guestLiveNowOnly)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                guestPianoKeysHeaderButton
+            }
+
             Text(
                 guestLiveNowOnly
                     ? String(localized: "Following the host's current chord — no ring.")
@@ -1373,6 +1380,40 @@ struct SessionView: View {
                 RingSourcePicker(showsLiveChords: ringSourceBinding)
             }
         }
+    }
+
+    /// Always-visible Piano Keys control for guests (portrait + landscape headers).
+    private var guestPianoKeysHeaderButton: some View {
+        Button {
+            showPianoOverlay = true
+        } label: {
+            Label(String(localized: "Piano Keys"), systemImage: "pianokeys")
+                .font(.subheadline.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Piano Keys"))
+    }
+
+    /// Compact icon for tight headers (e.g. landscape when space is limited).
+    private var guestPianoKeysIconButton: some View {
+        Button {
+            showPianoOverlay = true
+        } label: {
+            Image(systemName: "pianokeys")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(AppTheme.surfaceElevated)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Piano Keys"))
     }
 
     private var ringModeHeader: some View {
@@ -1424,6 +1465,13 @@ struct SessionView: View {
 
             if isGuest && isLivePerformance {
                 guestLiveViewStyleControls(includeRingSource: true)
+            } else if isGuest {
+                // Non-live guest: keep Piano Keys reachable without scrolling the bottom panel.
+                guestPianoKeysHeaderButton
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !(viewModel.payload.isLiveChordsOnly) {
+                    RingSourcePicker(showsLiveChords: ringSourceBinding)
+                }
             } else if !(isLivePerformance && viewModel.payload.isLiveChordsOnly) {
                 RingSourcePicker(showsLiveChords: ringSourceBinding)
             }
@@ -1498,7 +1546,10 @@ struct SessionView: View {
                         )
                     }
                 }
-                Spacer()
+                Spacer(minLength: 8)
+                if isGuest {
+                    guestPianoKeysIconButton
+                }
                 leaveSessionButton(style: .header)
             }
 
@@ -1508,6 +1559,9 @@ struct SessionView: View {
 
             if isGuest && isLivePerformance {
                 guestLiveViewStyleControls(includeRingSource: false)
+            } else if isGuest {
+                guestPianoKeysHeaderButton
+                    .frame(maxWidth: .infinity)
             }
 
             if isHost, !isPractice, !isLivePerformance, viewModel.payload.isRemoteBackupEnabled, let code = viewModel.payload.remoteJoinCode {
@@ -2711,6 +2765,24 @@ struct SessionView: View {
                     .padding(.horizontal, sessionHorizontalPadding)
             }
 
+            // Keep Piano Keys at the top of the bottom panel so guests don't have to scroll.
+            Button {
+                showPianoOverlay = true
+            } label: {
+                Label(String(localized: "Piano Keys"), systemImage: "pianokeys")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AppTheme.accent.opacity(0.18))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(AppTheme.accent.opacity(0.45), lineWidth: 1)
+                    )
+            }
+            .padding(.horizontal, sessionHorizontalPadding)
+
             Button {
                 showGuestSettings = true
             } label: {
@@ -2801,18 +2873,6 @@ struct SessionView: View {
             .padding(.vertical, 10)
             .background(AppTheme.surfaceElevated)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            Button {
-                showPianoOverlay = true
-            } label: {
-                Label(String(localized: "Piano Keys"), systemImage: "pianokeys")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(AppTheme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
 
             if viewModel.payload.isFretboardActive {
                 Button {

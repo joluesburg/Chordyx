@@ -54,7 +54,7 @@ enum ChordNotation: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum MusicalKey: String, Codable, CaseIterable, Identifiable, Sendable {
+nonisolated enum MusicalKey: String, Codable, CaseIterable, Identifiable, Sendable {
     case C, Cs, D, Eb, E, F, Fs, G, Ab, A, Bb, B
 
     var id: String { rawValue }

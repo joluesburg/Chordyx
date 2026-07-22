@@ -16,9 +16,26 @@ struct AdaptiveKeyDetection: Equatable, Sendable {
 
     enum Source: String, Sendable {
         case memory
+        case library
         case ensemble
         case heuristic
+        case audio
     }
+}
+
+/// Soft prior from live mic chroma (HPCP + KS). Cleared when stale.
+struct AudioKeyHint: Equatable, Sendable {
+    let key: MusicalKey
+    let confidence: Double
+    let scores: [MusicalKey: Double]
+    let updatedAt: TimeInterval
+}
+
+/// Saved progression snapshot used to ground live Auto-key detection.
+struct LibraryKeyHint: Equatable, Sendable {
+    let name: String
+    let key: MusicalKey
+    let symbols: [String]
 }
 
 @MainActor
@@ -35,6 +52,10 @@ final class AdaptiveKeyLearningEngine {
     /// Resolved off the main thread — never call `url(forUbiquityContainerIdentifier:)` on MainActor.
     private var cloudStoreURL: URL?
     private var isResolvingCloudStore = false
+    /// Latest library progressions for live sequence matching.
+    private(set) var libraryHints: [LibraryKeyHint] = []
+    /// Soft prior from live audio chroma (mic/line).
+    private var audioKeyHint: AudioKeyHint?
 
     private init() {
         // Fast local load only — iCloud resolution is async (ubiquity APIs can stall launch on Mac).
@@ -45,9 +66,31 @@ final class AdaptiveKeyLearningEngine {
 
     // MARK: - Public API
 
+    func updateLibraryHints(_ hints: [LibraryKeyHint]) {
+        libraryHints = hints.filter { $0.symbols.count >= 3 }
+    }
+
+    /// Feed HPCP/KS audio key estimate from the live mic pipeline.
+    func updateAudioKeyHint(key: MusicalKey, confidence: Double, scores: [MusicalKey: Double]) {
+        guard confidence >= 0.12 else { return }
+        audioKeyHint = AudioKeyHint(
+            key: key,
+            confidence: min(1, confidence),
+            scores: scores,
+            updatedAt: Date().timeIntervalSince1970
+        )
+    }
+
+    func clearAudioKeyHint() {
+        audioKeyHint = nil
+    }
+
     func detect(from symbols: [String], sessionName: String?) -> AdaptiveKeyDetection? {
         let normalized = normalizedSymbols(symbols)
-        guard normalized.count >= Self.minimumSymbols else { return nil }
+        guard normalized.count >= Self.minimumSymbols else {
+            // With enough audio evidence alone, still allow a soft lock.
+            return audioOnlyDetectionIfStrong()
+        }
 
         let fingerprint = KeyChordAnalysis.fingerprint(from: normalized)
 
@@ -55,39 +98,98 @@ final class AdaptiveKeyLearningEngine {
             return AdaptiveKeyDetection(key: memoryHit, confidence: 0.92, source: .memory)
         }
 
+        if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: normalized,
+            library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
+        ), libraryHit.confidence >= 0.72 {
+            return AdaptiveKeyDetection(
+                key: libraryHit.key,
+                confidence: libraryHit.confidence,
+                source: .library
+            )
+        }
+
+        // Market-grade MIR ensemble (KS, Temperley, functions, fifths, templates, HMM).
+        let intelligence = LiveKeyIntelligence.analyze(symbols: normalized)
         let heuristic = KeyDetector.detect(from: normalized)
-        let ks = KeyChordAnalysis.krumhanselSchmuckler(from: normalized)
         let neural = neuralScores(from: normalized)
+        let audio = freshAudioHint()
 
         var blended = [MusicalKey: Double]()
         for key in MusicalKey.allCases {
-            let h = heuristic?.key == key ? (heuristic?.confidence ?? 0) * 0.45 : 0
-            let k = ks[key] ?? 0
+            let intel = intelligence?.scores[key] ?? 0
+            let h = heuristic?.key == key ? (heuristic?.confidence ?? 0) : 0
             let n = neural[key] ?? 0
-            blended[key] = h + k * 0.38 + n * 0.22
+            let a = audio?.scores[key] ?? 0
+            // Chord intelligence leads; audio chroma + neural refine live lock.
+            blended[key] = intel * 0.52 + h * 0.14 + n * 0.16 + a * 0.18
         }
 
-        if let heuristic, blended[heuristic.key, default: 0] < 0.12 {
-            blended[heuristic.key, default: 0] += heuristic.confidence * 0.28
+        if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: normalized,
+            library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
+        ) {
+            blended[libraryHit.key, default: 0] += libraryHit.similarity * 0.28
+        }
+
+        if let audio {
+            blended[audio.key, default: 0] += audio.confidence * 0.22
         }
 
         let ranked = blended.sorted { $0.value > $1.value }
-        guard let best = ranked.first, best.value > 0.22,
-              ranked.count >= 2 else { return heuristic.map {
-            AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
-        }}
-
-        let runnerUp = ranked[1].value
-        let margin = best.value - runnerUp
-        let confidence = min(1, max(0.15, margin / max(best.value, 0.01)))
-
-        guard confidence >= 0.14 || best.value >= 0.55 else {
+        guard let best = ranked.first, best.value > 0.18,
+              ranked.count >= 2 else {
+            if let intelligence, intelligence.confidence >= 0.14 {
+                return AdaptiveKeyDetection(
+                    key: intelligence.bestKey,
+                    confidence: intelligence.confidence,
+                    source: .ensemble
+                )
+            }
+            if let audio, audio.confidence >= 0.28 {
+                return AdaptiveKeyDetection(key: audio.key, confidence: audio.confidence, source: .audio)
+            }
             return heuristic.map {
                 AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
             }
         }
 
-        return AdaptiveKeyDetection(key: best.key, confidence: confidence, source: .ensemble)
+        let runnerUp = ranked[1].value
+        let margin = best.value - runnerUp
+        var confidence = min(1, max(0.15, margin / max(best.value, 0.01)))
+        if let intelligence, intelligence.bestKey == best.key {
+            confidence = max(confidence, intelligence.confidence * 0.92)
+        }
+        if let audio, audio.key == best.key {
+            confidence = min(1, confidence + audio.confidence * 0.12)
+        }
+
+        guard confidence >= 0.14 || best.value >= 0.48 else {
+            return heuristic.map {
+                AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
+            }
+        }
+
+        let source: AdaptiveKeyDetection.Source =
+            (audio?.key == best.key && (audio?.confidence ?? 0) >= 0.4 && confidence < 0.5)
+            ? .audio
+            : .ensemble
+        return AdaptiveKeyDetection(key: best.key, confidence: confidence, source: source)
+    }
+
+    private func freshAudioHint() -> AudioKeyHint? {
+        guard let hint = audioKeyHint else { return nil }
+        // Discard stale chroma (>8s) so silent/old audio doesn't poison detection.
+        guard Date().timeIntervalSince1970 - hint.updatedAt <= 8 else {
+            audioKeyHint = nil
+            return nil
+        }
+        return hint
+    }
+
+    private func audioOnlyDetectionIfStrong() -> AdaptiveKeyDetection? {
+        guard let audio = freshAudioHint(), audio.confidence >= 0.38 else { return nil }
+        return AdaptiveKeyDetection(key: audio.key, confidence: audio.confidence, source: .audio)
     }
 
     func confirmDetection(symbols: [String], key: MusicalKey, sessionName: String?) {
@@ -196,13 +298,13 @@ final class AdaptiveKeyLearningEngine {
         }
     }
 
-    // MARK: - Neural online learner
+    // MARK: - Neural online learner (36-D: major / minor / dominant pitch-class mass)
 
     private func ensureNeuralInitialized() {
         guard neuralWeights.isEmpty else { return }
         neuralWeights = (0..<12).map { row in
-            (0..<24).map { col in
-                let seed = sin(Float(row * 24 + col) * 0.37) * 0.08
+            (0..<36).map { col in
+                let seed = sin(Float(row * 36 + col) * 0.37) * 0.08
                 return row == col % 12 ? seed + 0.12 : seed
             }
         }
@@ -212,33 +314,45 @@ final class AdaptiveKeyLearningEngine {
     private func featureVector(from symbols: [String]) -> [Float] {
         var pcMajor = [Float](repeating: 0, count: 12)
         var pcMinor = [Float](repeating: 0, count: 12)
+        var pcDominant = [Float](repeating: 0, count: 12)
         for (index, symbol) in symbols.enumerated() {
             guard let parsed = Transposer.parse(symbol),
                   let pc = Transposer.pitchClass(ofRoot: parsed.root) else { continue }
-            let weight = Float(1.0 + Double(index) / Double(max(symbols.count, 1)) * 0.4)
+            let weight = Float(1.0 + Double(index) / Double(max(symbols.count, 1)) * 0.45)
             let s = parsed.suffix.lowercased()
             if s.hasPrefix("m") && !s.hasPrefix("maj") {
                 pcMinor[pc] += weight
+            } else if s.hasPrefix("7") || s.contains("9") || s.contains("11") || s.contains("13") {
+                pcDominant[pc] += weight
             } else {
                 pcMajor[pc] += weight
             }
         }
-        let total = pcMajor.reduce(0, +) + pcMinor.reduce(0, +)
+        let total = pcMajor.reduce(0, +) + pcMinor.reduce(0, +) + pcDominant.reduce(0, +)
         if total > 0 {
             for i in 0..<12 {
                 pcMajor[i] /= total
                 pcMinor[i] /= total
+                pcDominant[i] /= total
             }
         }
-        return pcMajor + pcMinor
+        return pcMajor + pcMinor + pcDominant
     }
 
     private func neuralScores(from symbols: [String]) -> [MusicalKey: Double] {
+        ensureNeuralInitialized()
+        if neuralWeights.first?.count != 36 {
+            neuralWeights = []
+            ensureNeuralInitialized()
+        }
         let features = featureVector(from: symbols)
+        guard features.count == 36, neuralWeights.first?.count == 36 else {
+            return [:]
+        }
         var logits = [Float](repeating: 0, count: 12)
         for row in 0..<12 {
             var sum = neuralBias[row]
-            for col in 0..<24 {
+            for col in 0..<36 {
                 sum += neuralWeights[row][col] * features[col]
             }
             logits[row] = sum
@@ -253,10 +367,15 @@ final class AdaptiveKeyLearningEngine {
 
     private func trainNeural(symbols: [String], targetKey: MusicalKey, learningRate: Float) {
         let features = featureVector(from: symbols)
+        guard features.count == 36 else { return }
+        if neuralWeights.first?.count != 36 {
+            neuralWeights = []
+            ensureNeuralInitialized()
+        }
         var logits = [Float](repeating: 0, count: 12)
         for row in 0..<12 {
             var sum = neuralBias[row]
-            for col in 0..<24 {
+            for col in 0..<36 {
                 sum += neuralWeights[row][col] * features[col]
             }
             logits[row] = sum
@@ -266,7 +385,7 @@ final class AdaptiveKeyLearningEngine {
         for row in 0..<12 {
             let error = probs[row] - (row == target ? 1 : 0)
             neuralBias[row] -= learningRate * error
-            for col in 0..<24 {
+            for col in 0..<36 {
                 neuralWeights[row][col] -= learningRate * error * features[col]
             }
         }
@@ -314,8 +433,14 @@ final class AdaptiveKeyLearningEngine {
               let payload = try? JSONDecoder().decode(StorePayload.self, from: data) else { return }
         memory = payload.memory
         corrections = payload.corrections
-        neuralWeights = payload.neuralWeights
-        neuralBias = payload.neuralBias
+        // Drop legacy 24-D nets so the 36-D MIR feature space can re-init cleanly.
+        if payload.neuralWeights.first?.count == 36, payload.neuralBias.count == 12 {
+            neuralWeights = payload.neuralWeights
+            neuralBias = payload.neuralBias
+        } else {
+            neuralWeights = []
+            neuralBias = []
+        }
     }
 
     /// Call when the app becomes active so iCloud updates from other devices are picked up.
