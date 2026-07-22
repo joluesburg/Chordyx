@@ -452,6 +452,7 @@ struct HostSetupView: View {
     @State private var selectedNotation: ChordNotation = .symbol
     @State private var sessionKind: HostSessionKind = .progression
     @State private var performanceMode: SessionPerformanceMode = .live
+    @State private var keySelectionMode: SessionKeySelectionMode = .auto
     @AppStorage(SessionManager.requireHostApprovalKey) private var requireHostApproval = false
 
     var body: some View {
@@ -495,18 +496,11 @@ struct HostSetupView: View {
                     }
 
                     Section("Musical Key") {
-                        Picker("Key", selection: $selectedKey) {
-                            ForEach(MusicalKey.allCases) { key in
-                                Text(key.displayName).tag(key)
-                            }
-                        }
-                        .platformWheelPickerStyle(height: 120)
-
-                        if sessionKind == .liveChords {
-                            Text("Used to spell chord names (sharps vs flats).")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.textSecondary)
-                        }
+                        HostSetupMusicalKeyCard(
+                            mode: $keySelectionMode,
+                            manualKey: $selectedKey,
+                            showsSpellingHint: sessionKind == .liveChords
+                        )
                     }
 
                     Section("Chord Notation") {
@@ -555,20 +549,25 @@ struct HostSetupView: View {
     private func startSession() {
         viewModel.sessionManager.requireHostApproval = requireHostApproval
         let name = sessionName.trimmingCharacters(in: .whitespaces)
+        let autoDetectKey = keySelectionMode == .auto
+        // Auto AI: don't lock a manual chart key — start neutral (C) until detection from playing.
+        let key = autoDetectKey ? MusicalKey.C : selectedKey
 
         switch sessionKind {
         case .progression:
             viewModel.hostSession(
                 name: name.isEmpty ? L10n.jamSession : name,
-                key: selectedKey,
+                key: key,
                 notation: selectedNotation,
-                performanceMode: performanceMode
+                performanceMode: performanceMode,
+                autoDetectKey: autoDetectKey
             )
         case .liveChords:
             viewModel.hostLiveChordsSession(
                 name: name.isEmpty ? String(localized: "Live Chords") : name,
-                key: selectedKey,
-                notation: selectedNotation
+                key: key,
+                notation: selectedNotation,
+                autoDetectKey: autoDetectKey
             )
         }
         dismiss()

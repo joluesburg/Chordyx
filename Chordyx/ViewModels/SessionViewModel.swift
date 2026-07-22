@@ -769,6 +769,10 @@ final class SessionViewModel {
 
             if !notes.isEmpty, let symbol = self.payload.liveChordSymbol {
                 self.applyFreestyleSideEffects(for: symbol)
+                // Always run key AI from host piano/MIDI when Auto is on — any host, any session kind.
+                if self.payload.autoDetectKey {
+                    self.maybeAutoDetectKey()
+                }
                 self.updatePianoChartMismatch()
             }
             #if os(macOS) || os(iOS)
