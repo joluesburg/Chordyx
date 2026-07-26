@@ -264,8 +264,12 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
                 macPianoSheetBody
             }
         }
-        #else
-        if let onDismiss {
+        #elseif os(iOS)
+        // iPhone presents Piano Keys via SessionView root-swap so landscape rotation works.
+        // fullScreenCover often keeps a portrait size class when the device is rotated.
+        if PlatformDevice.isPhone {
+            content
+        } else if let onDismiss {
             content.fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
                 sheetContent()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -280,6 +284,8 @@ private struct PlatformPianoSheetModifier<SheetContent: View>: ViewModifier {
                     .platformDesktopControls()
             }
         }
+        #else
+        content
         #endif
     }
 

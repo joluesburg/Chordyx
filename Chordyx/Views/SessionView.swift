@@ -414,16 +414,48 @@ struct SessionView: View {
 
     var body: some View {
         Group {
+            // iPhone: root-swap Piano Keys so rotation / size classes match the session
+            // (fullScreenCover often stays stuck in portrait layout when the phone is rotated).
+            #if os(iOS)
+            if PlatformDevice.isPhone, showPianoOverlay {
+                phonePianoKeysScreen
+            } else if viewModel.payload.isStageDisplayOnly {
+                stageDisplayOnlyLayout
+            } else {
+                sessionWithAlerts
+            }
+            #else
             if viewModel.payload.isStageDisplayOnly {
                 stageDisplayOnlyLayout
             } else {
                 sessionWithAlerts
             }
+            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppTheme.backgroundGradient.ignoresSafeArea())
         .platformDesktopControls()
+        .onChange(of: viewModel.payload.isPianoActive) { _, isActive in
+            // Host overlay tracks share state; guests keep Piano Keys open independently.
+            if isHost, !isActive { showPianoOverlay = false }
+        }
     }
+
+    #if os(iOS)
+    private var phonePianoKeysScreen: some View {
+        PianoView(
+            viewModel: viewModel,
+            onDismiss: dismissPianoOverlay,
+            onLeaveSession: isGuest ? { showLeaveConfirmation = true } : nil
+        )
+        .confirmationDialog("Leave Session?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
+            Button("Leave Session", role: .destructive) {
+                viewModel.leaveSession()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+    #endif
 
     private var stageDisplayOnlyLayout: some View {
         ZStack(alignment: .topTrailing) {
@@ -518,15 +550,7 @@ struct SessionView: View {
             .onAppear(perform: configureSessionOnAppear)
             .onChange(of: viewModel.isInSession) { _, inSession in
                 if inSession {
-                    Task { @MainActor in
-                        #if os(iOS)
-                        try? await Task.sleep(for: .milliseconds(1200))
-                        #else
-                        try? await Task.sleep(for: .milliseconds(450))
-                        #endif
-                        guard viewModel.isInSession else { return }
-                        presentPreServiceChecklistIfNeeded()
-                    }
+                    viewModel.completeHostActivationIfNeeded()
                 }
             }
             .onChange(of: guestMetronomeAudioEnabled) { _, enabled in
@@ -563,17 +587,9 @@ struct SessionView: View {
         } else {
             viewModel.refreshMetronomeAudioPolicy()
             viewModel.prepareAutoKeyDetection(libraryStore: store)
+            viewModel.completeHostActivationIfNeeded()
         }
-        // Defer checklist so it doesn't present during session / permission transitions.
-        Task { @MainActor in
-            #if os(iOS)
-            try? await Task.sleep(for: .milliseconds(1200))
-            #else
-            try? await Task.sleep(for: .milliseconds(450))
-            #endif
-            guard viewModel.isInSession else { return }
-            presentPreServiceChecklistIfNeeded()
-        }
+        // Checklist auto-present stays disabled (nested sheets freeze hit-testing).
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
@@ -851,6 +867,7 @@ struct SessionView: View {
                     SessionJoinQRSheet(joinCode: code)
                 }
             }
+            // iPhone root-swaps Piano Keys in `body` (rotation-safe). iPad/Mac use the sheet.
             .platformPianoSheet(isPresented: $showPianoOverlay, onDismiss: dismissPianoOverlay) {
                 PianoView(
                     viewModel: viewModel,
@@ -864,10 +881,6 @@ struct SessionView: View {
                     onDismiss: dismissFretboardOverlay,
                     onLeaveSession: isGuest ? { showLeaveConfirmation = true } : nil
                 )
-            }
-            .onChange(of: viewModel.payload.isPianoActive) { _, isActive in
-                // Host overlay tracks share state; guests keep Piano Keys open independently.
-                if isHost, !isActive { showPianoOverlay = false }
             }
             .onChange(of: viewModel.payload.isFretboardActive) { _, isActive in
                 if isHost, !isActive { showFretboardOverlay = false }
@@ -1931,8 +1944,11 @@ struct SessionView: View {
     }
 
     private func presentPreServiceChecklistIfNeeded() {
+        // Do not auto-present on host start — nested sheets over Session freeze hit-testing
+        // on iPhone/Mac ("clicks do nothing"). Open manually from session controls.
         guard shouldOfferPreServiceChecklist else { return }
-        showPreServiceChecklist = true
+        guard showPreServiceChecklist == false else { return }
+        // Auto-show disabled for reliability; keep API for explicit toolbar actions.
     }
 
     private func markPreServiceChecklistDismissedForSession() {
