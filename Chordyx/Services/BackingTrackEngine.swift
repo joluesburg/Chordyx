@@ -65,13 +65,23 @@ final class BackingTrackEngine {
     private(set) var storedFileName: String?
     private(set) var displayName: String = ""
     private(set) var isPlaying = false
+    private(set) var currentTime: TimeInterval = 0
+    private(set) var duration: TimeInterval = 0
     private var player: AVAudioPlayer?
+    private var progressTask: Task<Void, Never>?
+
+    static let defaultSkipInterval: TimeInterval = 15
 
     var volume: Float = 0.85 {
         didSet { player?.volume = volume }
     }
 
     var hasTrack: Bool { storedFileName != nil }
+
+    static func formatTime(_ time: TimeInterval) -> String {
+        let total = max(0, Int(time.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
 
     func importTrack(from url: URL) throws {
         stop()
@@ -99,17 +109,35 @@ final class BackingTrackEngine {
         #endif
         player.play()
         isPlaying = true
+        syncTimingFromPlayer()
+        startProgressUpdates()
     }
 
     func pause() {
         player?.pause()
         isPlaying = false
+        syncTimingFromPlayer()
+        stopProgressUpdates()
     }
 
     func stop() {
         player?.stop()
         player?.currentTime = 0
         isPlaying = false
+        syncTimingFromPlayer()
+        stopProgressUpdates()
+    }
+
+    func seek(to time: TimeInterval) {
+        guard let player else { return }
+        let clamped = min(max(0, time), max(player.duration, 0))
+        player.currentTime = clamped
+        currentTime = clamped
+    }
+
+    func skip(by interval: TimeInterval) {
+        guard let player else { return }
+        seek(to: player.currentTime + interval)
     }
 
     func clear() {
@@ -120,11 +148,15 @@ final class BackingTrackEngine {
         storedFileName = nil
         displayName = ""
         player = nil
+        currentTime = 0
+        duration = 0
     }
 
     private func preparePlayer() {
         guard let fileName = storedFileName else {
             player = nil
+            currentTime = 0
+            duration = 0
             return
         }
         let url = BackingTrackStorage.fileURL(named: fileName)
@@ -134,8 +166,42 @@ final class BackingTrackEngine {
             audioPlayer.volume = volume
             audioPlayer.numberOfLoops = 0
             player = audioPlayer
+            syncTimingFromPlayer()
         } catch {
             player = nil
+            currentTime = 0
+            duration = 0
         }
+    }
+
+    private func syncTimingFromPlayer() {
+        guard let player else {
+            currentTime = 0
+            duration = 0
+            return
+        }
+        duration = player.duration
+        currentTime = player.currentTime
+        if isPlaying, !player.isPlaying {
+            isPlaying = false
+            currentTime = player.duration
+            stopProgressUpdates()
+        }
+    }
+
+    private func startProgressUpdates() {
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let self else { return }
+                self.syncTimingFromPlayer()
+            }
+        }
+    }
+
+    private func stopProgressUpdates() {
+        progressTask?.cancel()
+        progressTask = nil
     }
 }

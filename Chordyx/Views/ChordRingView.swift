@@ -18,7 +18,13 @@ struct ChordRingView: View {
     let radius: CGFloat
     let bubbleSize: CGFloat
     var beatChangeHint: Bool = false
+    /// When true, active chord/key highlights update instantly (live MIDI host).
+    var preferInstantActiveChanges: Bool = false
     let onTap: (ChordEntry) -> Void
+
+    private var activeHighlightAnimation: Animation? {
+        preferInstantActiveChanges ? nil : .spring(response: 0.35, dampingFraction: 0.72)
+    }
 
     var body: some View {
         let center = CGPoint(x: containerSize.width / 2, y: containerSize.height / 2)
@@ -49,7 +55,7 @@ struct ChordRingView: View {
                 let angle = angleForIndex(index, total: chords.count)
                 let x = center.x + radius * cos(angle)
                 let y = center.y + radius * sin(angle)
-                let isActive = activeChordSymbol.map { chord.symbolName == $0 }
+                let isActive = activeChordSymbol.map { LiveRing.matches(chord.symbolName, $0) }
                     ?? (chord.id == activeChordID)
 
                 ChordBubble(
@@ -64,6 +70,7 @@ struct ChordRingView: View {
                     order: index + 1,
                     isActive: isActive,
                     pulseHint: isActive && beatChangeHint,
+                    preferInstantActiveChanges: preferInstantActiveChanges,
                     size: bubbleSize
                 )
                 .position(x: x, y: y)
@@ -72,7 +79,7 @@ struct ChordRingView: View {
                         onTap(chord)
                     }
                 }
-                .animation(.spring(response: 0.35, dampingFraction: 0.72), value: activeChordSymbol ?? activeChordID?.uuidString)
+                .animation(activeHighlightAnimation, value: activeChordSymbol ?? activeChordID?.uuidString)
             }
         }
         .frame(width: containerSize.width, height: containerSize.height)
@@ -92,7 +99,12 @@ struct ChordBubble: View {
     let order: Int
     let isActive: Bool
     var pulseHint: Bool = false
+    var preferInstantActiveChanges: Bool = false
     let size: CGFloat
+
+    private var activeBubbleAnimation: Animation? {
+        preferInstantActiveChanges ? nil : .spring(response: 0.32, dampingFraction: 0.72)
+    }
 
     var body: some View {
         ZStack {
@@ -142,7 +154,7 @@ struct ChordBubble: View {
             .padding(.horizontal, 4)
         }
         .scaleEffect(isActive ? 1.10 : 1.0)
-        .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isActive)
+        .animation(activeBubbleAnimation, value: isActive)
     }
 }
 
@@ -158,6 +170,7 @@ struct CurrentChordDisplay: View {
     var onAddChords: (() -> Void)? = nil
     var isLiveFreestyle: Bool = false
     var isListeningForChord: Bool = false
+    var preferInstantActiveChanges: Bool = false
     /// When set, scales typography and gradient to fit the allotted center circle.
     var diameter: CGFloat? = nil
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -169,6 +182,10 @@ struct CurrentChordDisplay: View {
     private var chordFontSize: CGFloat {
         let scale = emphasized ? 0.46 : 0.40
         return max(38, effectiveDiameter * scale)
+    }
+
+    private var centerChordAnimation: Animation? {
+        preferInstantActiveChanges ? nil : .spring(response: 0.35, dampingFraction: 0.7)
     }
 
     private var centerGradientEndRadius: CGFloat {
@@ -228,7 +245,7 @@ struct CurrentChordDisplay: View {
                         .foregroundStyle(AppTheme.accent)
                         .minimumScaleFactor(0.4)
                         .lineLimit(1)
-                        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: chord.id)
+                        .animation(centerChordAnimation, value: chord.id)
 
                     if let upcoming {
                         HStack(spacing: 5) {
@@ -320,5 +337,6 @@ struct CurrentChordDisplay: View {
                 .padding()
             }
         }
+        .frame(width: diameter ?? effectiveDiameter, height: diameter ?? effectiveDiameter)
     }
 }

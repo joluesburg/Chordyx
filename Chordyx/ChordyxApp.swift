@@ -23,10 +23,17 @@ struct ChordyxMacApp: App {
 #else
 @main
 struct ChordyxApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(ChordyxAppDelegate.self) private var appDelegate
+    #endif
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .task {
+                    #if os(iOS)
+                    PhoneOrientationMonitor.shared.start()
+                    #endif
                     AdaptiveKeyLearningEngine.shared.reloadFromDisk()
                 }
         }

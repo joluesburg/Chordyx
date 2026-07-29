@@ -679,3 +679,68 @@ enum PlatformLayout {
         #endif
     }
 }
+
+#if os(macOS)
+/// Installs session shortcuts only while `enabled` — omitted entirely during chat/text entry.
+struct MacSessionKeyCommandsModifier: ViewModifier {
+    var enabled: Bool
+    var canDrive: Bool
+    var usesLiveDock: Bool
+    var onPreviousChord: () -> Void
+    var onNextChord: () -> Void
+    var onToggleMetronome: () -> Void
+    var onSelectDockTab: (LiveHostDockTab) -> Void
+    var onToggleSideRail: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .onKeyPress(.leftArrow) {
+                    onPreviousChord()
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    onNextChord()
+                    return .handled
+                }
+                .onKeyPress(.space) {
+                    guard canDrive else { return .ignored }
+                    onToggleMetronome()
+                    return .handled
+                }
+                .onKeyPress("1", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onSelectDockTab(.quick)
+                    return .handled
+                }
+                .onKeyPress("2", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onSelectDockTab(.metronome)
+                    return .handled
+                }
+                .onKeyPress("3", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onSelectDockTab(.audio)
+                    return .handled
+                }
+                .onKeyPress("4", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onSelectDockTab(.cues)
+                    return .handled
+                }
+                .onKeyPress("5", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onSelectDockTab(.session)
+                    return .handled
+                }
+                .onKeyPress("\\", phases: .down) { _ in
+                    guard usesLiveDock else { return .ignored }
+                    onToggleSideRail()
+                    return .handled
+                }
+        } else {
+            content
+        }
+    }
+}
+#endif

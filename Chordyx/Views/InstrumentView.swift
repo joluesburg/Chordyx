@@ -395,7 +395,11 @@ struct FretboardView: View {
             let openColumn = max(28, min(geo.size.width * (isCompactHeight ? 0.07 : 0.10), 56))
             let boardWidth = max(geo.size.width - openColumn, 1)
             let fretWidth = boardWidth / CGFloat(fretCount)
-            let rowHeight = geo.size.height / CGFloat(stringCount)
+            // Cap row height so a tall full-screen container doesn't stretch strings.
+            let maxRowHeight = max(fretWidth * (isCompactHeight ? 0.95 : 1.15), isCompactHeight ? 22 : 28)
+            let rowHeight = min(geo.size.height / CGFloat(stringCount), maxRowHeight)
+            let boardHeight = rowHeight * CGFloat(stringCount)
+            let yOffset = max(0, (geo.size.height - boardHeight) / 2)
             let maxDot: CGFloat = isCompactHeight ? 26 : 34
             let minDot: CGFloat = isCompactHeight ? 12 : 16
             let dotSize = min(max(minDot, min(rowHeight * 0.72, fretWidth * 0.78)), maxDot)
@@ -405,21 +409,21 @@ struct FretboardView: View {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: isCompactHeight ? 8 : 10)
                     .fill(woodColor)
-                    .frame(width: boardWidth, height: geo.size.height)
-                    .offset(x: openColumn)
+                    .frame(width: boardWidth, height: boardHeight)
+                    .offset(x: openColumn, y: yOffset)
 
                 // Nut
                 Rectangle()
                     .fill(Color.white.opacity(0.85))
-                    .frame(width: isCompactHeight ? 4 : 5, height: geo.size.height)
-                    .offset(x: openColumn)
+                    .frame(width: isCompactHeight ? 4 : 5, height: boardHeight)
+                    .offset(x: openColumn, y: yOffset)
 
                 // Fret lines
                 ForEach(1...fretCount, id: \.self) { fret in
                     Rectangle()
                         .fill(Color.white.opacity(0.25))
-                        .frame(width: 1.5, height: geo.size.height)
-                        .offset(x: openColumn + CGFloat(fret) * fretWidth)
+                        .frame(width: 1.5, height: boardHeight)
+                        .offset(x: openColumn + CGFloat(fret) * fretWidth, y: yOffset)
                 }
 
                 // Inlay markers (frets 3,5,7,9,12)
@@ -429,25 +433,24 @@ struct FretboardView: View {
                         .frame(width: inlaySize, height: inlaySize)
                         .position(
                             x: openColumn + (CGFloat(fret) - 0.5) * fretWidth,
-                            y: geo.size.height / 2
+                            y: yOffset + boardHeight / 2
                         )
                 }
 
                 // Strings (rows) - lowest string at the bottom
                 ForEach(0..<stringCount, id: \.self) { stringIndex in
-                    let y = rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
+                    let y = yOffset + rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
                     let thickness = (isCompactHeight ? 0.8 : 1.0) + Double(stringCount - 1 - stringIndex) * (isCompactHeight ? 0.45 : 0.6)
 
                     Rectangle()
                         .fill(Color.white.opacity(0.55))
-                        .frame(height: thickness)
-                        .frame(maxWidth: .infinity)
+                        .frame(width: boardWidth + openColumn, height: thickness)
                         .position(x: geo.size.width / 2, y: y)
                 }
 
                 // Open-string note labels
                 ForEach(0..<stringCount, id: \.self) { stringIndex in
-                    let y = rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
+                    let y = yOffset + rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
                     openMarker(
                         stringIndex: stringIndex,
                         x: openColumn / 2,
@@ -457,10 +460,10 @@ struct FretboardView: View {
                     )
                 }
 
-                // Fretted chord tones
+                // Fretted chord tones — markers only; never change board geometry.
                 if !pitchClasses.isEmpty {
                     ForEach(0..<stringCount, id: \.self) { stringIndex in
-                        let y = rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
+                        let y = yOffset + rowHeight * (CGFloat(stringCount - 1 - stringIndex) + 0.5)
                         ForEach(1...fretCount, id: \.self) { fret in
                             frettedMarker(
                                 stringIndex: stringIndex,
@@ -475,6 +478,8 @@ struct FretboardView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            // Chord tone updates should not animate board layout.
+            .transaction { $0.animation = nil }
         }
         .accessibilityElement(children: .contain)
     }

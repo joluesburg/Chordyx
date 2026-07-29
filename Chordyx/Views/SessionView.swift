@@ -49,10 +49,14 @@ struct SessionView: View {
     @State private var showGuestRoles = false
     @State private var showRehearsalList = false
     @State private var showJoinQR = false
+    @State private var showBandChat = false
+    @State private var bandChatLastReadAt: Double = 0
     @State private var isKeyMenuPresented = false
     @AppStorage(GuestDisplaySettings.transposeKey) private var guestTranspose = 0
     @AppStorage(GuestDisplaySettings.capoKey) private var guestCapo = 0
     @AppStorage(GuestDisplaySettings.bandCuePadVisibleKey) private var bandCuePadVisible = false
+    @AppStorage(GuestDisplaySettings.bandChatBadgesKey) private var bandChatBadgesEnabled = true
+    @AppStorage(GuestDisplaySettings.bandChatCompactKey) private var bandChatCompactEnabled = false
     @AppStorage(SessionDockSettings.layoutModeKey) private var liveDockLayoutModeRaw = LiveDockLayoutMode.automatic.rawValue
     @AppStorage(SessionDockSettings.heightPresetKey) private var liveDockHeightPresetRaw = LiveDockHeightPreset.standard.rawValue
     @AppStorage(SessionDockSettings.selectedTabKey) private var liveDockSelectedTabRaw = LiveHostDockTab.quick.rawValue
@@ -543,6 +547,26 @@ struct SessionView: View {
     private var sessionWithOverlays: some View {
         sessionLayoutWithLifecycle
             .overlay { sessionOverlayStack }
+            .overlay { compactBandChatOverlay }
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showBandChat)
+    }
+
+    /// iPad / Mac compact chat: narrow trailing panel so the chord center stays visible.
+    private var usesCompactBandChatSidePanel: Bool {
+        bandChatCompactEnabled
+            && PlatformLayout.usesWideSessionLayout(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    @ViewBuilder
+    private var compactBandChatOverlay: some View {
+        if showBandChat, usesCompactBandChatSidePanel {
+            BandChatCompactSidePanel(viewModel: viewModel) {
+                showBandChat = false
+                bandChatLastReadAt = Date().timeIntervalSince1970
+            }
+            .onAppear { bandChatLastReadAt = Date().timeIntervalSince1970 }
+            .zIndex(40)
+        }
     }
 
     private var sessionLayoutWithLifecycle: some View {
@@ -551,6 +575,8 @@ struct SessionView: View {
             .onChange(of: viewModel.isInSession) { _, inSession in
                 if inSession {
                     viewModel.completeHostActivationIfNeeded()
+                    // Don't badge history that already existed when you joined.
+                    bandChatLastReadAt = Date().timeIntervalSince1970
                 }
             }
             .onChange(of: guestMetronomeAudioEnabled) { _, enabled in
@@ -578,6 +604,40 @@ struct SessionView: View {
         beatFlashOverlayContent
         songEndingOverlayContent
         reconnectOverlayContent
+        bandChatToastOverlayContent
+    }
+
+    @ViewBuilder
+    private var bandChatToastOverlayContent: some View {
+        if !showBandChat, let toast = viewModel.bandChatToastText {
+            VStack {
+                Button {
+                    showBandChat = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .foregroundStyle(AppTheme.accentSecondary)
+                        Text(toast)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.surfaceElevated.opacity(0.96))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, sessionHorizontalPadding)
+                .padding(.top, 10)
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .zIndex(30)
+        }
     }
 
     private func configureSessionOnAppear() {
@@ -588,6 +648,10 @@ struct SessionView: View {
             viewModel.refreshMetronomeAudioPolicy()
             viewModel.prepareAutoKeyDetection(libraryStore: store)
             viewModel.completeHostActivationIfNeeded()
+        }
+        // SessionView often mounts after isInSession is already true, so onChange won't fire.
+        if viewModel.isInSession, bandChatLastReadAt == 0 {
+            bandChatLastReadAt = Date().timeIntervalSince1970
         }
         // Checklist auto-present stays disabled (nested sheets freeze hit-testing).
     }
@@ -818,6 +882,14 @@ struct SessionView: View {
         }
     }
 
+    /// Sheet presentation when compact side panel is not used (full or medium detent).
+    private var bandChatSheetPresented: Binding<Bool> {
+        Binding(
+            get: { showBandChat && !usesCompactBandChatSidePanel },
+            set: { showBandChat = $0 }
+        )
+    }
+
     @ViewBuilder
     private var sessionWithSheets: some View {
         sessionWithOverlays
@@ -829,8 +901,16 @@ struct SessionView: View {
                     viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
                 }
                 viewModel.refreshMetronomeAudioPolicy()
+                viewModel.refreshLocalDisplaySettings()
             }) {
                 GuestMusicianSettingsView()
+            }
+            .platformSheet(isPresented: bandChatSheetPresented, onDismiss: {
+                bandChatLastReadAt = Date().timeIntervalSince1970
+            }, large: !bandChatCompactEnabled) {
+                BandChatSheet(viewModel: viewModel)
+                    .onAppear { bandChatLastReadAt = Date().timeIntervalSince1970 }
+                    .modifier(BandChatCompactSheetChrome(enabled: bandChatCompactEnabled))
             }
             .platformSheet(isPresented: $showLockScreenSettings) {
                 LockScreenActivitySettingsView()
@@ -890,57 +970,25 @@ struct SessionView: View {
                     showLiveChordsOnRing = showsLive
                 }
             }
-#if os(macOS)
-            .onKeyPress(.leftArrow) {
-                viewModel.requestControlAction(.previousChord)
-                return .handled
-            }
-            .onKeyPress(.rightArrow) {
-                viewModel.requestControlAction(.advanceChord)
-                return .handled
-            }
-            .onKeyPress(.space) {
-                if viewModel.canDriveSession { viewModel.toggleMetronome() }
-                return .handled
-            }
-            .onKeyPress("1", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                liveDockSelectedTabRaw = LiveHostDockTab.quick.rawValue
-                liveSideRailVisible = true
-                return .handled
-            }
-            .onKeyPress("2", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                liveDockSelectedTabRaw = LiveHostDockTab.metronome.rawValue
-                liveSideRailVisible = true
-                return .handled
-            }
-            .onKeyPress("3", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                liveDockSelectedTabRaw = LiveHostDockTab.audio.rawValue
-                liveSideRailVisible = true
-                return .handled
-            }
-            .onKeyPress("4", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                liveDockSelectedTabRaw = LiveHostDockTab.cues.rawValue
-                liveSideRailVisible = true
-                return .handled
-            }
-            .onKeyPress("5", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                liveDockSelectedTabRaw = LiveHostDockTab.session.rawValue
-                liveSideRailVisible = true
-                return .handled
-            }
-            .onKeyPress("\\", phases: .down) { _ in
-                guard usesLiveHostControlDock else { return .ignored }
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                    liveSideRailVisible.toggle()
+            #if os(macOS)
+            .modifier(MacSessionKeyCommandsModifier(
+                enabled: !shouldIgnoreMacSessionKeyPresses,
+                canDrive: viewModel.canDriveSession,
+                usesLiveDock: usesLiveHostControlDock,
+                onPreviousChord: { viewModel.requestControlAction(.previousChord) },
+                onNextChord: { viewModel.requestControlAction(.advanceChord) },
+                onToggleMetronome: { viewModel.toggleMetronome() },
+                onSelectDockTab: { tab in
+                    liveDockSelectedTabRaw = tab.rawValue
+                    liveSideRailVisible = true
+                },
+                onToggleSideRail: {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        liveSideRailVisible.toggle()
+                    }
                 }
-                return .handled
-            }
-#endif
+            ))
+            #endif
             .fileImporter(
                 isPresented: $showBackingTrackImporter,
                 allowedContentTypes: [.mp3, .wav, .aiff, .mpeg4Audio, .audio],
@@ -1203,12 +1251,69 @@ struct SessionView: View {
             }
         }
         .overlay(alignment: notationOverlayAlignment) {
-            NotationCycleButton(viewModel: viewModel, isGuest: isGuest)
-                .padding(.trailing, sessionHorizontalPadding)
-                .padding(notationOverlayAlignment == .topTrailing ? .top : .bottom, 8)
-                .zIndex(20)
+            VStack(spacing: 8) {
+                NotationCycleButton(viewModel: viewModel, isGuest: isGuest)
+                if showsBandChatEntry {
+                    BandChatEntryButton(unreadCount: bandChatUnreadCount) {
+                        showBandChat = true
+                    }
+                }
+            }
+            .padding(.trailing, sessionHorizontalPadding)
+            .padding(notationOverlayAlignment == .topTrailing ? .top : .bottom, 8)
+            .zIndex(20)
         }
     }
+
+    /// Chat stays opt-in — hidden on projector / congregation surfaces.
+    private var showsBandChatEntry: Bool {
+        guard viewModel.isInSession || isPractice else { return false }
+        if viewModel.payload.isStageDisplayOnly { return false }
+        if viewModel.payload.isCongregationModeActive { return false }
+        switch effectiveDisplayMode {
+        case .audience, .congregation: return false
+        default: return true
+        }
+    }
+
+    private var bandChatUnreadCount: Int {
+        guard bandChatBadgesEnabled else { return 0 }
+        let myName = SessionManager.currentDisplayName()
+        return viewModel.payload.bandChatMessages.filter {
+            $0.sentAt > bandChatLastReadAt && $0.senderName != myName
+        }.count
+    }
+
+    /// When true, Mac session shortcuts are not installed at all (chat / forms / text focus).
+    private var shouldIgnoreMacSessionKeyPresses: Bool {
+        #if os(macOS)
+        if showBandChat
+            || showGuestSettings
+            || showMetadataEditor
+            || showSaveDialog
+            || showMIDISettings
+            || showProgressionEditor
+            || showPreServiceChecklist
+            || showExtendedFeaturesHub
+            || showAdvancedFeaturesHub
+            || showPianoOverlay
+            || isKeyMenuPresented {
+            return true
+        }
+        return macTextInputHasFocus
+        #else
+        false
+        #endif
+    }
+
+    #if os(macOS)
+    private var macTextInputHasFocus: Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        if responder is NSTextView || responder is NSTextField { return true }
+        let name = String(describing: type(of: responder))
+        return name.contains("Text") || name.contains("FieldEditor")
+    }
+    #endif
 
     private func importSessionGuideBanner(_ guide: SessionViewModel.ImportSessionGuide) -> some View {
         VStack {
@@ -1668,6 +1773,7 @@ struct SessionView: View {
             showGuestRoles: $showGuestRoles,
             showRehearsalList: $showRehearsalList,
             showJoinQR: $showJoinQR,
+            showBandChat: $showBandChat,
             showBackingTrackImporter: $showBackingTrackImporter,
             showSaveDialog: $showSaveDialog,
             saveName: $saveName,
@@ -1766,8 +1872,8 @@ struct SessionView: View {
                 }
             }
 
-            #if os(macOS)
-            if viewModel.canDriveSession {
+            #if os(macOS) || os(iOS)
+            if viewModel.soloAccompanimentAvailable {
                 SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
             }
             #endif
@@ -1820,8 +1926,8 @@ struct SessionView: View {
                 .padding(.horizontal, sessionHorizontalPadding)
             }
 
-            #if os(macOS)
-            if viewModel.canDriveSession {
+            #if os(macOS) || os(iOS)
+            if viewModel.soloAccompanimentAvailable {
                 SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
                     .padding(.horizontal, sessionHorizontalPadding)
             }
@@ -2521,7 +2627,8 @@ struct SessionView: View {
                     showRehearsalList: $showRehearsalList,
                     showJoinQR: $showJoinQR,
                     showExtendedFeaturesHub: $showExtendedFeaturesHub,
-                    showAdvancedFeaturesHub: $showAdvancedFeaturesHub
+                    showAdvancedFeaturesHub: $showAdvancedFeaturesHub,
+                    showBandChat: $showBandChat
                 )
                 VocalKeyPicker(viewModel: viewModel)
                 Spacer()
@@ -2830,6 +2937,26 @@ struct SessionView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .padding(.horizontal, sessionHorizontalPadding)
+
+            if showsBandChatEntry {
+                Button {
+                    showBandChat = true
+                } label: {
+                    Label(
+                        bandChatUnreadCount > 0
+                            ? String(format: String(localized: "Band chat (%lld)"), bandChatUnreadCount)
+                            : String(localized: "Band chat"),
+                        systemImage: "bubble.left.and.bubble.right.fill"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .padding(.horizontal, sessionHorizontalPadding)
+            }
 
             #if os(iOS)
             Button {

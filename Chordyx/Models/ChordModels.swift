@@ -399,6 +399,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     /// Positive = ahead of metronome, negative = behind.
     var tempoDriftBPM: Double = 0
     var quickMessages: [SessionQuickMessage] = []
+    /// Shared band chat log (host + guests). Synced on full state only — not live bursts.
+    var bandChatMessages: [SessionQuickMessage] = []
     var peerPresence: [String: PeerPresenceInfo] = [:]
     var handoffCountdown: Int?
     var handoffFromPeer: String?
@@ -448,6 +450,7 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     func forHighFrequencyPeerSync() -> SessionSyncPayload {
         var copy = self
         copy.quickMessages = []
+        copy.bandChatMessages = []
         copy.readinessScore = nil
         copy.chartDeliveryModes = [:]
         copy.clickTrackLanes = [:]
@@ -461,6 +464,16 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         copy.setlistSongTitles = []
         copy.peerChordPositions = [:]
         return copy
+    }
+
+    /// True when this payload looks like a stripped high-frequency cloud publish.
+    func looksLikeHighFrequencyPeerSyncStrip(comparedTo prior: SessionSyncPayload) -> Bool {
+        sessionToken == prior.sessionToken
+            && chords.isEmpty
+            && sections.isEmpty
+            && bandChatMessages.isEmpty
+            && quickMessages.isEmpty
+            && (!prior.chords.isEmpty || !prior.sections.isEmpty || !prior.bandChatMessages.isEmpty)
     }
 
     /// Minimal live-chord packet for sub-10ms peer sync (guest merges into existing state).
@@ -525,6 +538,9 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
             && guestRoleAssignments == prior.guestRoleAssignments
             && pendingHostHandoffPeer == prior.pendingHostHandoffPeer
             && coHostPeerName == prior.coHostPeerName
+            // Chat / quick messages must take the full-merge path, not live-burst merge.
+            && bandChatMessages == prior.bandChatMessages
+            && quickMessages == prior.quickMessages
     }
 
     func applyingLiveBurst(from received: SessionSyncPayload) -> SessionSyncPayload {
@@ -620,10 +636,10 @@ enum ChordCatalog {
     ]
 
     static func chords(for notation: ChordNotation) -> [(symbol: String, latin: String)] {
-        chords
+        chords.map { ($0.symbol, latinName(forSymbol: $0.symbol)) }
     }
 
-    /// Converts a letter-name chord (e.g. "C#m7") into its solfège form ("Do♯m7").
+    /// Converts a letter-name chord (e.g. "C#m7") into its configured Latin spelling ("Do#m7").
     /// Slash chords convert both sides ("C/E" → "Do/Mi"); numeric slashes like
     /// "C6/9" are preserved since "9" has no root letter to convert.
     static func latinName(forSymbol symbol: String) -> String {
@@ -635,13 +651,44 @@ enum ChordCatalog {
     }
 
     private static func convertRoot(_ symbol: String) -> String {
-        guard let first = symbol.first, let solfege = solfegeForLetter[first] else {
+        guard let split = splitLetterRoot(from: symbol) else { return symbol }
+        let toneNames = GuestDisplaySettings.chromaticToneNames
+        let mappedRoot: String
+        if let custom = toneNames.name(forLetterRoot: split.root) {
+            mappedRoot = custom
+        } else if let first = split.root.first {
+            let letter = Character(first.uppercased())
+            guard let solfege = solfegeForLetter[letter] else { return symbol }
+            let accidental = String(split.root.dropFirst())
+                .replacingOccurrences(of: "#", with: "♯")
+                .replacingOccurrences(of: "b", with: "♭")
+            mappedRoot = solfege + accidental
+        } else {
             return symbol
         }
-        let rest = symbol.dropFirst()
+        let quality = split.quality
             .replacingOccurrences(of: "#", with: "♯")
             .replacingOccurrences(of: "b", with: "♭")
-        return solfege + rest
+        return mappedRoot + quality
+    }
+
+    /// Splits `C#m7` → root `C#`, quality `m7`; `Bb` → `Bb` / ``; `9` → nil.
+    private static func splitLetterRoot(from symbol: String) -> (root: String, quality: String)? {
+        guard let first = symbol.first else { return nil }
+        let letter = Character(first.uppercased())
+        guard solfegeForLetter[letter] != nil else { return nil }
+        var rootEnd = symbol.index(after: symbol.startIndex)
+        while rootEnd < symbol.endIndex {
+            let ch = symbol[rootEnd]
+            if ch == "#" || ch == "♯" || ch == "＃" || ch == "b" || ch == "♭" {
+                rootEnd = symbol.index(after: rootEnd)
+            } else {
+                break
+            }
+        }
+        let root = String(symbol[..<rootEnd])
+        let quality = String(symbol[rootEnd...])
+        return (root, quality)
     }
 }
 
@@ -1088,8 +1135,9 @@ enum ChordRecognizer {
         guard !normalized.isEmpty else { return nil }
 
         let split = handSplitIndex
-        let left = normalized.filter { $0 < split }
-        let right = normalized.filter { $0 >= split }
+        // Bass-octave twins that sit on/above C3 still belong to LH analysis
+        // (Do2+Do3 under an upper structure must not look like RH-only C + G triad).
+        let (left, right) = PianoNote.analysisHandGroups(for: normalized, split: split)
 
         let leftPCs = Set(left.map { PianoNote.pitchClass(of: $0) })
         let rightPCs = Set(right.map { PianoNote.pitchClass(of: $0) })
@@ -1121,14 +1169,27 @@ enum ChordRecognizer {
         if let leftSymbol, leftPCs.count >= 3 {
             resolved = stripSlashBass(leftSymbol)
         }
+        // 1a) Octave bass shell + combined chord on that bass wins over a misleading
+        //     lower-register partial (C+G+B below C4 can false-match Gadd11 via omit-fifth).
+        else if PianoNote.hasSoundingBassOctaveShell(normalized),
+                let overallBass,
+                let combinedSymbol,
+                let combinedTriad = ChordTheory.beginnerMajorMinorTriad(for: combinedSymbol),
+                combinedTriad.root == overallBass {
+            resolved = stripSlashBass(combinedSymbol)
+        }
         // 1b) Full triad in the lower register (< C4), even if the 5th sits on D3/E3.
+        //     Require the triad root to match the lower bass so partial upper tones don't steal the label.
         else if let lowerSymbol,
                 lowerPCs.count >= 3,
-                ChordTheory.beginnerMajorMinorTriad(for: lowerSymbol) != nil {
+                let lowerBass,
+                let lowerTriad = ChordTheory.beginnerMajorMinorTriad(for: lowerSymbol),
+                lowerTriad.root == lowerBass {
             resolved = stripSlashBass(lowerSymbol)
         }
         // 2) Sparse LH (octaves/root) + combined chord rooted on that bass → keep quality.
         //    La+La + Am7 / C–E–G → Am7 (beginner shows Am), never plain A major.
+        //    Also: Do+Do + Sol–Si–Re–Mi → Cmaj9, never plain G from the upper structure alone.
         else if leftPCs.count <= 2,
                 let leftBass,
                 let combinedSymbol,
@@ -1143,7 +1204,28 @@ enum ChordRecognizer {
                 let rhTriad = ChordTheory.beginnerMajorMinorTriad(for: rightSymbol),
                 rhTriad.root != leftBass {
             let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
-            resolved = rhTriad.isMinor ? names[leftBass] + "m" : names[leftBass]
+            // Prefer combined bass-rooted quality when RH looks like an upper structure of that bass.
+            if let combinedSymbol,
+               let combinedTriad = ChordTheory.beginnerMajorMinorTriad(for: combinedSymbol),
+               combinedTriad.root == leftBass {
+                resolved = stripSlashBass(combinedSymbol)
+            } else {
+                resolved = rhTriad.isMinor ? names[leftBass] + "m" : names[leftBass]
+            }
+        } else if let rightSymbol,
+                  let overallBass,
+                  let rhTriad = ChordTheory.beginnerMajorMinorTriad(for: rightSymbol),
+                  rhTriad.root != overallBass,
+                  PianoNote.hasSoundingBassOctaveShell(normalized) {
+            // Never let RH-only labeling win over a clear LH octave shell.
+            if let combinedSymbol,
+               let combinedTriad = ChordTheory.beginnerMajorMinorTriad(for: combinedSymbol),
+               combinedTriad.root == overallBass {
+                resolved = stripSlashBass(combinedSymbol)
+            } else {
+                let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
+                resolved = rhTriad.isMinor ? names[overallBass] + "m" : names[overallBass]
+            }
         } else if let rightSymbol {
             resolved = stripSlashBass(rightSymbol)
         } else if let leftSymbol {
@@ -1158,6 +1240,34 @@ enum ChordRecognizer {
             return remembered
         }
         return resolved
+    }
+
+    /// When a live label disagrees with the sounding bass octave shell, prefer the bass-rooted symbol.
+    /// Feeds TwoHandChordMemory so the next pass of the same voicing stays stable.
+    static func reconcileSymbolWithVoicing(
+        notes: [Int],
+        chordSymbol: String?,
+        preferFlats: Bool
+    ) -> String? {
+        let normalized = notes
+            .map { PianoNote.normalizeToInternal($0) }
+            .filter { PianoNote.keyboardRange.contains($0) }
+            .sorted()
+        guard !normalized.isEmpty else { return chordSymbol }
+
+        let voicingSymbol = symbolConsideringBothHands(notes: normalized, preferFlats: preferFlats)
+        guard let chordSymbol, !chordSymbol.isEmpty else { return voicingSymbol }
+
+        guard PianoNote.symbolConflictsWithSoundingBass(chordSymbol: chordSymbol, notes: normalized) else {
+            return chordSymbol
+        }
+
+        if let voicingSymbol {
+            TwoHandChordMemory.shared.remember(notes: normalized, symbol: voicingSymbol)
+            return voicingSymbol
+        }
+        // Drop the conflicting label rather than keep a root that tears hand roles apart.
+        return nil
     }
 
     /// Pure string helper — safe outside the main actor (Swift 6 Optional.map).
@@ -1204,13 +1314,14 @@ final class TwoHandChordMemory: @unchecked Sendable {
     }
 
     private func fingerprint(_ notes: [Int]) -> String {
-        // v2: corrected sparse-LH + combined quality (Am over A octaves, not A major).
+        // v3: bass-octave twins on/above C3 count as LH (Do2+Do3 under upper structure).
         let split = ChordRecognizer.handSplitIndex
-        let left = Set(notes.filter { $0 < split }.map { PianoNote.pitchClass(of: $0) }).sorted()
-        let right = Set(notes.filter { $0 >= split }.map { PianoNote.pitchClass(of: $0) }).sorted()
+        let (leftNotes, rightNotes) = PianoNote.analysisHandGroups(for: notes, split: split)
+        let left = Set(leftNotes.map { PianoNote.pitchClass(of: $0) }).sorted()
+        let right = Set(rightNotes.map { PianoNote.pitchClass(of: $0) }).sorted()
         let leftPart = left.map(String.init).joined(separator: ",")
         let rightPart = right.map(String.init).joined(separator: ",")
-        return "v2|L\(leftPart)|R\(rightPart)"
+        return "v3|L\(leftPart)|R\(rightPart)"
     }
 }
 
@@ -1227,15 +1338,15 @@ enum PianoNote {
     /// On-screen live keyboard shows the full 88-key span (scrollable on all platforms).
     static let liveKeyboardRange = keyboardRange
 
-    /// Dual-row lower board: A0 (9) … B2 (35).
-    static let lowerKeyboardRange = 9...35
+    /// Dual-row lower board: A0 (9) … B3 (47) — fixed window; LH notes light here.
+    static let lowerKeyboardRange = 9...47
 
-    /// Dual-row upper board: C3 (36) … C8 (96).
+    /// Dual-row upper board: C3 (36) … C8 (96) — fixed window; RH notes light here.
+    /// Overlaps LH through B3 so neither hand feels cut off; lighting stays exclusive per hand.
     static let upperKeyboardRange = 36...96
 
-    /// Minimum gap (semitones) to treat as a hand break (perfect fifth).
-    /// Smaller gaps fall back to the classic C3 split so close-position chords stay together.
-    private static let handGapThreshold = 7
+    /// Classic C3 register boundary used when assigning bass vs treble roles.
+    static let handRegisterSplit = 36
 
     /// MIDI note numbers for the 88-key span (A0=21 … C8=108).
     static let keyboardMIDIRange = 21...108
@@ -1254,13 +1365,13 @@ enum PianoNote {
     static let preferredWhiteKeyWidth: CGFloat = 46
 
     /// Musical left / right-hand division for dual piano boards.
-    /// Keeps bass octaves (Do–Do) on the left board instead of leaving a lonely bass note.
+    /// Uses fixed board windows and role-based assignment (bass/root vs chord body).
     struct HandDivision: Equatable, Sendable {
         let leftNotes: [Int]
         let rightNotes: [Int]
-        /// Keys shown on the lower (LH) board.
+        /// Keys shown on the lower (LH) board — always `lowerKeyboardRange` for dual layouts.
         let lowerRange: ClosedRange<Int>
-        /// Keys shown on the upper (RH) board.
+        /// Keys shown on the upper (RH) board — always `upperKeyboardRange` for dual layouts.
         let upperRange: ClosedRange<Int>
 
         var usesBothHands: Bool { !leftNotes.isEmpty && !rightNotes.isEmpty }
@@ -1276,11 +1387,34 @@ enum PianoNote {
         }
     }
 
+    /// How Piano Keys presents the live keyboard.
+    enum KeysLayoutMode: String, CaseIterable, Identifiable, Sendable {
+        case auto
+        case alwaysDual
+        case single
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .auto: String(localized: "Auto")
+            case .alwaysDual: String(localized: "2 hands")
+            case .single: String(localized: "1 keyboard")
+            }
+        }
+    }
+
     /// Split a live voicing into LH / RH for dual-board display.
-    /// Example: C2+C3+B3+D4+E4+G4 → LH octave C2–C3, RH B3–G4 (not a lonely C2).
-    static func handDivision(for notes: [Int]) -> HandDivision? {
+    /// - LH: bass / root (+ octave or fifth below the treble cluster)
+    /// - RH: remaining chord tones
+    /// Board ranges stay fixed so the UI does not jump when voicings change.
+    /// When `chordSymbol` root conflicts with the sounding bass octave shell, the symbol
+    /// is ignored for hand-role fifths so a bad live label cannot tear octaves apart.
+    static func handDivision(for notes: [Int], chordSymbol: String? = nil) -> HandDivision? {
         let sorted = Array(Set(notes.map { normalizeToInternal($0) }.filter { keyboardRange.contains($0) })).sorted()
         guard sorted.count >= 2 else { return nil }
+
+        let roleRootPC = handRoleRootPitchClass(sorted: sorted, chordSymbol: chordSymbol)
 
         // Pure octaves / unisons of one pitch class → one bass board.
         let pitchClasses = Set(sorted.map { pitchClass(of: $0) })
@@ -1288,159 +1422,258 @@ enum PianoNote {
             return lowerOnlyDivision(leftNotes: sorted)
         }
 
-        var bestSplitAfter: Int?
-        var bestScore = -Double.infinity
-        var bestGap = -1
-        for index in 0..<(sorted.count - 1) {
-            let low = sorted[index]
-            let high = sorted[index + 1]
-            let gap = high - low
-            // Never cut between octave doubles (same pitch class ~12 semitones apart).
-            if pitchClass(of: low) == pitchClass(of: high), (11...13).contains(gap) {
-                continue
-            }
-
-            let left = Array(sorted[0...index])
-            let right = Array(sorted[(index + 1)...])
-            let score = handSplitScore(left: left, right: right, gap: gap)
-            if score > bestScore {
-                bestScore = score
-                bestSplitAfter = index
-                bestGap = gap
-            }
-        }
-
-        var left: [Int]
-        var right: [Int]
-        // Only trust a musical gap split when the break is a fifth or wider.
-        if let bestSplitAfter, bestGap >= handGapThreshold, bestScore >= 6 {
-            left = Array(sorted[0...bestSplitAfter])
-            right = Array(sorted[(bestSplitAfter + 1)...])
-        } else {
-            // Classic register split at C3 when the voicing is close-position.
-            let split = upperKeyboardRange.lowerBound
-            left = sorted.filter { $0 < split }
-            right = sorted.filter { $0 >= split }
-        }
-
-        // If "right" only doubles pitch classes already in the left (octave twins), fold into LH.
-        if !left.isEmpty, !right.isEmpty {
-            let leftPCs = Set(left.map { pitchClass(of: $0) })
-            let rightPCs = Set(right.map { pitchClass(of: $0) })
-            if rightPCs.isSubset(of: leftPCs) {
-                return lowerOnlyDivision(leftNotes: sorted)
-            }
-        }
+        let (left, right) = assignHandsByMusicalRole(sorted: sorted, rootPitchClass: roleRootPC)
 
         if right.isEmpty {
             return lowerOnlyDivision(leftNotes: left)
         }
         if left.isEmpty {
-            // Treble-only cluster — single upper-oriented board via nil (scroll single).
+            // Treble-only cluster — single scrolling board.
             return nil
-        }
-
-        guard let leftMax = left.max(),
-              let rightMin = right.min(),
-              leftMax < rightMin else { return nil }
-
-        // Exclusive board ranges: LH notes only on lower, RH only on upper.
-        let lowerEnd = min(max(leftMax, lowerKeyboardRange.upperBound), rightMin - 1)
-        let lowerRange = lowerKeyboardRange.lowerBound...lowerEnd
-        let upperStart = lowerRange.upperBound + 1
-        let upperRange = upperStart...upperKeyboardRange.upperBound
-        guard lowerRange.lowerBound <= lowerRange.upperBound,
-              upperRange.lowerBound <= upperRange.upperBound,
-              left.allSatisfy({ lowerRange.contains($0) }),
-              right.allSatisfy({ upperRange.contains($0) }) else {
-            // Fallback: tight exclusive cut between hands.
-            let tightLower = lowerKeyboardRange.lowerBound...leftMax
-            let tightUpper = rightMin...upperKeyboardRange.upperBound
-            guard tightLower.upperBound < tightUpper.lowerBound else { return nil }
-            return HandDivision(
-                leftNotes: left,
-                rightNotes: right,
-                lowerRange: tightLower,
-                upperRange: tightUpper
-            )
         }
 
         return HandDivision(
             leftNotes: left,
             rightNotes: right,
-            lowerRange: lowerRange,
-            upperRange: upperRange
-        )
-    }
-
-    private static func lowerOnlyDivision(leftNotes: [Int]) -> HandDivision? {
-        guard !leftNotes.isEmpty, let high = leftNotes.max() else { return nil }
-        let end = min(keyboardRange.upperBound, max(high, lowerKeyboardRange.upperBound))
-        return HandDivision(
-            leftNotes: leftNotes,
-            rightNotes: [],
-            lowerRange: lowerKeyboardRange.lowerBound...end,
+            lowerRange: lowerKeyboardRange,
             upperRange: upperKeyboardRange
         )
     }
 
-    /// Higher is better. Rewards a clear gap, compact LH bass, and playable hand spans.
-    private static func handSplitScore(left: [Int], right: [Int], gap: Int) -> Double {
-        guard let leftMin = left.min(), let leftMax = left.max(),
-              let rightMin = right.min(), let rightMax = right.max() else { return -100 }
+    /// Groups notes for two-hand chord analysis (not dual-board lighting).
+    /// Bass-octave twins through B3 stay with the left-hand group even at/above C3.
+    static func analysisHandGroups(for sorted: [Int], split: Int) -> (left: [Int], right: [Int]) {
+        guard let lowest = sorted.first else { return ([], []) }
+        let bassPC = pitchClass(of: lowest)
+        var left: [Int] = []
+        var right: [Int] = []
+        for note in sorted {
+            let isBassTwin = pitchClass(of: note) == bassPC
+                && note <= lowerKeyboardRange.upperBound
+                && (note < split || note - lowest <= 12)
+            if note < split || isBassTwin {
+                left.append(note)
+            } else {
+                right.append(note)
+            }
+        }
+        return (left, right)
+    }
 
-        var score = Double(gap) * 1.35
+    /// True when the lowest pitch class is doubled as a low octave shell (e.g. Do2+Do3).
+    static func hasSoundingBassOctaveShell(_ notes: [Int]) -> Bool {
+        let sorted = Array(Set(notes.map { normalizeToInternal($0) }.filter { keyboardRange.contains($0) })).sorted()
+        guard let lowest = sorted.first else { return false }
+        let bassPC = pitchClass(of: lowest)
+        guard sorted.contains(where: { pitchClass(of: $0) == bassPC && $0 < handRegisterSplit }) else {
+            return false
+        }
+        return sorted.contains {
+            pitchClass(of: $0) == bassPC
+                && $0 > lowest
+                && $0 <= lowerKeyboardRange.upperBound
+                && $0 - lowest <= 12
+        }
+    }
 
-        // Clear hand break (fifth or more).
-        if gap >= handGapThreshold { score += 8 }
-        else if gap >= 5 { score += 3 }
-        else { score -= 6 }
+    /// Live chord label root disagrees with an octave bass shell in the MIDI voicing.
+    static func symbolConflictsWithSoundingBass(chordSymbol: String?, notes: [Int]) -> Bool {
+        guard let chordSymbol,
+              let symbolRoot = ChordTheory.tones(for: chordSymbol)?.root,
+              hasSoundingBassOctaveShell(notes),
+              let bassPC = notes
+                .map({ normalizeToInternal($0) })
+                .filter({ keyboardRange.contains($0) })
+                .min()
+                .map({ pitchClass(of: $0) })
+        else { return false }
+        return symbolRoot != bassPC
+    }
 
-        // Typical LH: 1–3 notes (root, octave, or shell).
-        switch left.count {
-        case 1: score += 4
-        case 2: score += 5
-        case 3: score += 3
-        case 4: score += 0
-        default: score -= Double(left.count - 3) * 2
+    /// Root used only for optional LH fifth shells. Prefer sounding bass; drop conflicting symbols.
+    static func handRoleRootPitchClass(sorted: [Int], chordSymbol: String?) -> Int? {
+        guard let symbolRoot = chordSymbol.flatMap({ ChordTheory.tones(for: $0)?.root }) else {
+            return nil
+        }
+        guard let bassPC = sorted.first.map({ pitchClass(of: $0) }) else { return symbolRoot }
+        if symbolRoot == bassPC { return symbolRoot }
+        // Octave bass under a mismatched label (C octaves labeled G) → ignore symbol root.
+        if hasSoundingBassOctaveShell(sorted) { return nil }
+        // True slash / alternate bass (single low tone) may keep chord-root fifth cues.
+        return symbolRoot
+    }
+
+    /// Assign notes to LH/RH using bass register + root/fifth roles.
+    private static func assignHandsByMusicalRole(
+        sorted: [Int],
+        rootPitchClass: Int?
+    ) -> (left: [Int], right: [Int]) {
+        guard let lowest = sorted.first else { return ([], []) }
+
+        // Pure treble cluster (nothing below C3) → one scrolling keyboard.
+        guard sorted.contains(where: { $0 < handRegisterSplit }) else {
+            return ([], [])
         }
 
-        // RH should carry the chord body.
-        if right.count >= 2 { score += 3 }
-        if right.count >= 3 { score += 2 }
+        // LH octaves follow the *sounding* bass note, not the chord-symbol root.
+        // Otherwise C2+C3 under a G-ish recognition (Sol–Si–Re–Mi on top) leaves only one Do on LH.
+        let playedBassPC = pitchClass(of: lowest)
+        let fifthOfBassPC = (playedBassPC + 7) % 12
+        // Optional: also treat chord-root fifth as LH shell when it matches a low dyad.
+        let chordFifthPC = rootPitchClass.map { ($0 + 7) % 12 }
 
-        // Prefer LH staying in the bass / low middle register.
-        if leftMax <= 43 { score += 4 }       // through G3
-        else if leftMax < middleC { score += 1 }
-        else { score -= 5 }
+        var leftSet = Set<Int>()
+        for note in sorted {
+            let pc = pitchClass(of: note)
+            if note < handRegisterSplit {
+                leftSet.insert(note)
+                continue
+            }
+            guard note <= lowerKeyboardRange.upperBound else { continue }
 
-        if rightMin >= upperKeyboardRange.lowerBound { score += 2 }
+            // Keep every octave of the sounding bass on LH through B3 (Do+Do).
+            if pc == playedBassPC {
+                let hasLowerTwin = sorted.contains { pitchClass(of: $0) == pc && $0 < handRegisterSplit }
+                if hasLowerTwin || note - lowest <= 12 {
+                    leftSet.insert(note)
+                }
+                continue
+            }
 
-        // Penalize impossible one-hand stretches (~ major 10th+).
-        let leftSpan = leftMax - leftMin
-        let rightSpan = rightMax - rightMin
-        if leftSpan > 16 { score -= Double(leftSpan - 16) }
-        if rightSpan > 16 { score -= Double(rightSpan - 16) }
+            // Low fifth shells (G2+D3, or C2+G2) stay on LH.
+            let isBassFifth = pc == fifthOfBassPC
+            let isChordFifth = chordFifthPC == pc
+            if isBassFifth || isChordFifth {
+                let hasLowerTwin = sorted.contains { pitchClass(of: $0) == pc && $0 < handRegisterSplit }
+                if hasLowerTwin || note - lowest <= 7 {
+                    leftSet.insert(note)
+                }
+            }
+        }
 
-        // Bonus when LH is octave / fifth doubles of one or two bass tones.
-        let leftPCs = Set(left.map { pitchClass(of: $0) })
-        if leftPCs.count == 1 { score += 4 }
-        else if leftPCs.count == 2 { score += 1 }
+        // Always keep the lowest bass tone + its octaves on LH through B3.
+        leftSet.insert(lowest)
+        for note in sorted where pitchClass(of: note) == playedBassPC && note <= lowerKeyboardRange.upperBound {
+            let hasLowerTwin = sorted.contains { pitchClass(of: $0) == playedBassPC && $0 < handRegisterSplit }
+            if hasLowerTwin || note == lowest || note - lowest <= 12 {
+                leftSet.insert(note)
+            }
+        }
 
-        return score
+        var left = sorted.filter { leftSet.contains($0) }
+        var right = sorted.filter { !leftSet.contains($0) }
+
+        // If everything landed on LH but there is a clear treble gap, move upper non-bass tones to RH.
+        if right.isEmpty, left.count >= 3, let gapSplit = firstWideGapSplit(in: left) {
+            let newLeft = Array(left[0...gapSplit])
+            let leftFinal = Set(newLeft)
+            left = newLeft
+            right = sorted.filter { !leftFinal.contains($0) }
+        }
+
+        // Fold RH that only doubles LH pitch classes back into lower-only.
+        if !left.isEmpty, !right.isEmpty {
+            let leftPCs = Set(left.map { pitchClass(of: $0) })
+            let rightPCs = Set(right.map { pitchClass(of: $0) })
+            if rightPCs.isSubset(of: leftPCs) {
+                return (sorted, [])
+            }
+        }
+
+        return (left, right)
+    }
+
+    private static func firstWideGapSplit(in sorted: [Int]) -> Int? {
+        guard sorted.count >= 2 else { return nil }
+        var bestIndex: Int?
+        var bestGap = 0
+        for index in 0..<(sorted.count - 1) {
+            let low = sorted[index]
+            let high = sorted[index + 1]
+            let gap = high - low
+            if pitchClass(of: low) == pitchClass(of: high), (11...13).contains(gap) {
+                continue
+            }
+            if gap >= 7, gap > bestGap {
+                bestGap = gap
+                bestIndex = index
+            }
+        }
+        return bestIndex
+    }
+
+    private static func lowerOnlyDivision(leftNotes: [Int]) -> HandDivision? {
+        guard !leftNotes.isEmpty else { return nil }
+        return HandDivision(
+            leftNotes: leftNotes,
+            rightNotes: [],
+            lowerRange: lowerKeyboardRange,
+            upperRange: upperKeyboardRange
+        )
     }
 
     /// True when a voicing should use stacked LH/RH boards.
-    static func spansBothHands(_ notes: [Int]) -> Bool {
-        handDivision(for: notes)?.usesBothHands ?? false
+    static func spansBothHands(_ notes: [Int], chordSymbol: String? = nil) -> Bool {
+        handDivision(for: notes, chordSymbol: chordSymbol)?.usesBothHands ?? false
     }
 
     /// Bass-only voicing (e.g. Sol2+Sol3) that should use one extended lower board.
-    static func lowerBoardOnly(for notes: [Int]) -> HandDivision? {
-        guard let division = handDivision(for: notes),
+    static func lowerBoardOnly(for notes: [Int], chordSymbol: String? = nil) -> HandDivision? {
+        guard let division = handDivision(for: notes, chordSymbol: chordSymbol),
               !division.leftNotes.isEmpty,
               division.rightNotes.isEmpty else { return nil }
         return division
+    }
+
+    /// Remap live notes onto a previous hand shape (same chord) so boards don't flip-flop.
+    static func stickyHandDivision(
+        for notes: [Int],
+        previous: HandDivision,
+        chordSymbol: String? = nil
+    ) -> HandDivision {
+        let sorted = Array(Set(notes.map { normalizeToInternal($0) }.filter { keyboardRange.contains($0) })).sorted()
+        guard !sorted.isEmpty else { return previous }
+
+        if previous.rightNotes.isEmpty {
+            return lowerOnlyDivision(leftNotes: sorted) ?? previous
+        }
+
+        let leftPCs = Set(previous.leftNotes.map { pitchClass(of: $0) })
+        let rightPCs = Set(previous.rightNotes.map { pitchClass(of: $0) })
+        let playedBassPC = sorted.first.map { pitchClass(of: $0) }
+
+        var left: [Int] = []
+        var right: [Int] = []
+        for note in sorted {
+            let pc = pitchClass(of: note)
+            if leftPCs.contains(pc), note <= lowerKeyboardRange.upperBound {
+                left.append(note)
+            } else if let playedBassPC, pc == playedBassPC, note <= lowerKeyboardRange.upperBound {
+                // Keep sounding-bass octaves on LH even if a prior split missed them.
+                left.append(note)
+            } else if rightPCs.contains(pc) {
+                right.append(note)
+            } else if note < handRegisterSplit {
+                left.append(note)
+            } else {
+                right.append(note)
+            }
+        }
+
+        if left.isEmpty, let lowest = sorted.first {
+            left = [lowest]
+            right = sorted.filter { $0 != lowest }
+        }
+        if right.isEmpty {
+            return lowerOnlyDivision(leftNotes: left.isEmpty ? sorted : left) ?? previous
+        }
+
+        return HandDivision(
+            leftNotes: left,
+            rightNotes: right,
+            lowerRange: lowerKeyboardRange,
+            upperRange: upperKeyboardRange
+        )
     }
 
     static func whiteKeyCount(in range: ClosedRange<Int>) -> Int {
@@ -1491,8 +1724,8 @@ enum PianoNote {
     }
 
     static func latinName(of index: Int, preferFlats: Bool) -> String {
-        let symbol = (preferFlats ? Transposer.flatNames : Transposer.sharpNames)[pitchClass(of: index)]
-        return ChordCatalog.latinName(forSymbol: symbol)
+        _ = preferFlats
+        return GuestDisplaySettings.chromaticToneNames.name(forPitchClass: pitchClass(of: index))
     }
 
     static func latinName(forStored value: Int, preferFlats: Bool) -> String {
@@ -1500,7 +1733,142 @@ enum PianoNote {
     }
 
     static func keyboardLabel(for index: Int, preferFlats: Bool) -> String {
-        let showOctave = pitchClass(of: index) == 0 || isBlack(index)
-        return name(of: index, preferFlats: preferFlats, includeOctave: showOctave)
+        _ = preferFlats
+        let pc = pitchClass(of: index)
+        let base = GuestDisplaySettings.chromaticToneNames.name(forPitchClass: pc)
+        let showOctave = pc == 0 || isBlack(index)
+        return showOctave ? "\(base)\(octave(of: index))" : base
+    }
+}
+
+// MARK: - Live hand-split stabilizer (hysteresis)
+
+/// Keeps LH/RH assignment stable while the same chord is held so boards don't flip in live play.
+/// Integrates voicing fingerprints + confidence so a flickering/wrong `liveChordSymbol`
+/// cannot tear a held octave bass + upper-structure split apart.
+@MainActor
+final class PianoHandSplitStabilizer {
+    private var lastSymbol: String?
+    private var lastVoicingKey: String?
+    private var lastDivision: PianoNote.HandDivision?
+    private var lockedAt: Date = .distantPast
+    /// Hold the previous split this long after notes change under the same chord / voicing.
+    var lockDuration: TimeInterval = 0.45
+
+    func reset() {
+        lastSymbol = nil
+        lastVoicingKey = nil
+        lastDivision = nil
+        lockedAt = .distantPast
+    }
+
+    func division(for notes: [Int], chordSymbol: String?) -> PianoNote.HandDivision? {
+        // Ignore conflicting labels for hand roles (Do+Do labeled as G, etc.).
+        let roleSymbol: String?
+        if PianoNote.symbolConflictsWithSoundingBass(chordSymbol: chordSymbol, notes: notes) {
+            roleSymbol = nil
+            // Teach two-hand memory the bass-rooted reading so the next recognition pass is stable.
+            _ = ChordRecognizer.reconcileSymbolWithVoicing(
+                notes: notes,
+                chordSymbol: chordSymbol,
+                preferFlats: false
+            )
+        } else {
+            roleSymbol = chordSymbol
+        }
+
+        let fresh = PianoNote.handDivision(for: notes, chordSymbol: roleSymbol)
+        let normalizedSymbol = chordSymbol?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let symbolKey = (normalizedSymbol?.isEmpty == false) ? normalizedSymbol : nil
+        let voicingKey = Self.voicingFingerprint(notes)
+        let now = Date()
+
+        // Symbol flicker on the same held voicing is NOT a chord change.
+        let symbolChanged = symbolKey != lastSymbol
+        let voicingHeld = lastVoicingKey != nil && voicingKey == lastVoicingKey
+        if symbolChanged && !voicingHeld {
+            lastSymbol = symbolKey
+            lastVoicingKey = voicingKey
+            lastDivision = fresh
+            lockedAt = now
+            return fresh
+        }
+
+        lastSymbol = symbolKey
+        lastVoicingKey = voicingKey
+
+        guard let previous = lastDivision else {
+            lastDivision = fresh
+            lockedAt = now
+            return fresh
+        }
+
+        let withinLock = now.timeIntervalSince(lockedAt) < lockDuration
+        let stickyPreferred = withinLock || previous.usesBothHands || previous.rightNotes.isEmpty || voicingHeld
+
+        if stickyPreferred {
+            let sticky = PianoNote.stickyHandDivision(for: notes, previous: previous, chordSymbol: roleSymbol)
+            // Only leave sticky when fresh evidence is strong and does not tear the bass shell.
+            if !withinLock, shouldAdoptFresh(fresh, over: sticky, notes: notes) {
+                lastDivision = fresh
+                lockedAt = now
+                return fresh
+            }
+            lastDivision = sticky
+            return sticky
+        }
+
+        if shouldAdoptFresh(fresh, over: previous, notes: notes) {
+            lastDivision = fresh
+            lockedAt = now
+            return fresh
+        }
+
+        let sticky = PianoNote.stickyHandDivision(for: notes, previous: previous, chordSymbol: roleSymbol)
+        lastDivision = sticky
+        return sticky
+    }
+
+    /// Bass PC + pitch-class set — stable while the same voicing is held.
+    private static func voicingFingerprint(_ notes: [Int]) -> String {
+        let sorted = Array(
+            Set(notes.map { PianoNote.normalizeToInternal($0) }.filter { PianoNote.keyboardRange.contains($0) })
+        ).sorted()
+        let bass = sorted.first.map { PianoNote.pitchClass(of: $0) } ?? -1
+        let pcs = Set(sorted.map { PianoNote.pitchClass(of: $0) }).sorted().map(String.init).joined(separator: ",")
+        return "\(bass)|\(pcs)"
+    }
+
+    /// Adopt a new split only when it keeps the sounding bass shell and is a clear dual/lower shape.
+    private func shouldAdoptFresh(
+        _ fresh: PianoNote.HandDivision?,
+        over previous: PianoNote.HandDivision,
+        notes: [Int]
+    ) -> Bool {
+        guard let fresh else { return false }
+        if fresh == previous { return true }
+
+        let sorted = Array(
+            Set(notes.map { PianoNote.normalizeToInternal($0) }.filter { PianoNote.keyboardRange.contains($0) })
+        ).sorted()
+        guard let lowest = sorted.first else { return true }
+        let bassPC = PianoNote.pitchClass(of: lowest)
+        let bassShell = sorted.filter {
+            PianoNote.pitchClass(of: $0) == bassPC && $0 <= PianoNote.lowerKeyboardRange.upperBound
+        }
+        let freshKeepsBass = Set(bassShell).isSubset(of: Set(fresh.leftNotes))
+        let previousKeepsBass = Set(bassShell).isSubset(of: Set(previous.leftNotes))
+
+        // Never flip to a split that tears a previously intact octave bass.
+        if previousKeepsBass && !freshKeepsBass { return false }
+        if !freshKeepsBass { return false }
+
+        // Same hand shape (dual vs lower-only) with remapped notes is fine.
+        if fresh.usesBothHands == previous.usesBothHands { return true }
+        // Switching dual ↔ single needs a clear dual gap or a pure lower board.
+        if fresh.usesBothHands {
+            return !fresh.rightNotes.isEmpty && fresh.leftNotes.count >= 1
+        }
+        return fresh.rightNotes.isEmpty
     }
 }

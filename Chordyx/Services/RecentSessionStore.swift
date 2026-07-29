@@ -14,6 +14,7 @@ struct RecentSessionRecord: Identifiable, Codable, Equatable, Sendable {
     var lastJoinedAt: Date
     var lastActiveChordID: UUID?
     var progressionName: String?
+    var remoteJoinCode: String?
 
     init(
         id: UUID = UUID(),
@@ -23,7 +24,8 @@ struct RecentSessionRecord: Identifiable, Codable, Equatable, Sendable {
         key: MusicalKey,
         lastJoinedAt: Date = Date(),
         lastActiveChordID: UUID? = nil,
-        progressionName: String? = nil
+        progressionName: String? = nil,
+        remoteJoinCode: String? = nil
     ) {
         self.id = id
         self.sessionName = sessionName
@@ -33,6 +35,7 @@ struct RecentSessionRecord: Identifiable, Codable, Equatable, Sendable {
         self.lastJoinedAt = lastJoinedAt
         self.lastActiveChordID = lastActiveChordID
         self.progressionName = progressionName
+        self.remoteJoinCode = remoteJoinCode
     }
 
     var key: MusicalKey {
@@ -65,7 +68,8 @@ enum RecentSessionStore {
         hostDeviceName: String,
         sessionToken: UUID,
         key: MusicalKey,
-        progressionName: String? = nil
+        progressionName: String? = nil,
+        remoteJoinCode: String? = nil
     ) {
         var list = records.filter {
             !($0.sessionName == sessionName && $0.hostDeviceName == hostDeviceName)
@@ -76,7 +80,8 @@ enum RecentSessionStore {
                 hostDeviceName: hostDeviceName,
                 sessionToken: sessionToken,
                 key: key,
-                progressionName: progressionName
+                progressionName: progressionName,
+                remoteJoinCode: remoteJoinCode
             ),
             at: 0
         )

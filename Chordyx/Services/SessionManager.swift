@@ -54,8 +54,19 @@ final class SessionManager: NSObject {
     private var bestRoundTrip: Double = .infinity
     private var calibrationTask: Task<Void, Never>?
     private var pendingInvitations: [String: (Bool, MCSession?) -> Void] = [:]
+    private(set) var isInviting = false
+    private var suppressGuestDisconnectNotification = false
+
+    private var pendingStatePacket: Data?
+    private var pendingStatePeer: MCPeerID?
+    private var receiveCoalesceTask: Task<Void, Never>?
+
+    private var pendingLiveBroadcast: (data: Data, peers: [MCPeerID])?
+    private var liveBroadcastCoalesceTask: Task<Void, Never>?
+    private var lastSentLiveSymbol: String?
 
     var onPayloadReceived: ((SessionSyncPayload) -> Void)?
+    var onLiveChordReceived: ((LiveChordWire) -> Void)?
     var onPeersUpdated: (([MCPeerID]) -> Void)?
     var onClockOffsetUpdated: (() -> Void)?
     var onControlRequest: ((SessionControlAction, MCPeerID) -> Void)?
@@ -80,14 +91,21 @@ final class SessionManager: NSObject {
         hostingTempoBPM = tempoBPM
         hostingSessionToken = sessionToken
         lastError = nil
-        // Detached: Local Network permission must not run under MainActor or iPhone UI freezes
-        // (Xcode shows "Task … Queue : com.apple.main-thread").
+        // Start Multipeer immediately. Awaiting Local Network permission first left hosting
+        // delayed/stuck and could freeze UI; Bonjour prompts when advertising begins.
+        beginHosting(sessionName: safeName)
         let serviceType = Self.serviceType
-        Task.detached(priority: .userInitiated) { [weak self, safeName] in
+        Task.detached(priority: .utility) {
             await LocalNetworkPermission.requestAccess(serviceType: serviceType)
-            await MainActor.run {
-                self?.beginHosting(sessionName: safeName)
-            }
+        }
+    }
+
+    func startBrowsing() {
+        lastError = nil
+        beginBrowsing()
+        let serviceType = Self.serviceType
+        Task.detached(priority: .utility) {
+            await LocalNetworkPermission.requestAccess(serviceType: serviceType)
         }
     }
 
@@ -100,30 +118,16 @@ final class SessionManager: NSObject {
         refreshAdvertiserDiscoveryInfo(sessionName: sessionName)
     }
 
-    func startBrowsing() {
-        lastError = nil
-        let serviceType = Self.serviceType
-        Task.detached(priority: .userInitiated) { [weak self] in
-            await LocalNetworkPermission.requestAccess(serviceType: serviceType)
-            await MainActor.run {
-                self?.beginBrowsing()
-            }
-        }
-    }
-
     /// Re-publish the host on macOS if Bonjour advertising was interrupted.
     func refreshHostingIfNeeded() {
-        guard isHost, let sessionName = hostingSessionName else { return }
-        if session != nil {
-            if advertiser == nil {
-                refreshAdvertiserDiscoveryInfo(sessionName: sessionName)
-            } else {
-                advertiser?.stopAdvertisingPeer()
-                advertiser?.startAdvertisingPeer()
-            }
-            return
+        guard isHost, let sessionName = hostingSessionName, session != nil else { return }
+
+        if advertiser == nil {
+            refreshAdvertiserDiscoveryInfo(sessionName: sessionName)
+        } else if session?.connectedPeers.isEmpty == true {
+            advertiser?.stopAdvertisingPeer()
+            advertiser?.startAdvertisingPeer()
         }
-        beginHosting(sessionName: sessionName)
     }
 
     private func refreshAdvertiserDiscoveryInfo(sessionName: String) {
@@ -171,8 +175,12 @@ final class SessionManager: NSObject {
         ]
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: discoveryInfo, serviceType: Self.serviceType)
         advertiser?.delegate = self
-        advertiser?.startAdvertisingPeer()
         connectionState = .hosting
+        // Defer Bonjour advertise one turn so Session UI stays interactive on first frame.
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.advertiser?.startAdvertisingPeer()
+        }
     }
 
     private func beginBrowsing() {
@@ -193,7 +201,12 @@ final class SessionManager: NSObject {
 
     func joinHost(_ host: DiscoveredHost) {
         hostPeer = host.peer
-        guard let browser, let session else { return }
+        guard let browser, let session else {
+            lastError = String(localized: "Still searching for sessions. Try again in a moment.")
+            return
+        }
+        guard !isInviting else { return }
+        isInviting = true
         browser.invitePeer(host.peer, to: session, withContext: nil, timeout: 20)
     }
 
@@ -209,9 +222,35 @@ final class SessionManager: NSObject {
         pendingJoinRequests.removeAll { $0.peer.displayName == request.peer.displayName }
     }
 
-    func broadcast(_ payload: SessionSyncPayload) {
+    func broadcastLive(_ wire: LiveChordWire) {
         guard isHost, let session, !session.connectedPeers.isEmpty else { return }
-        send(.state(payload), to: session.connectedPeers, mode: .reliable)
+        guard let data = SessionMessageCodec.encode(.liveChord(wire)) else { return }
+        let peers = session.connectedPeers
+        let symbolChanged = wire.liveChordSymbol != lastSentLiveSymbol
+        // Piano-key teaching needs reliable delivery — unreliable drops mid-chord notes.
+        let mode: MCSessionSendDataMode = wire.pianoNotes.isEmpty ? .unreliable : .reliable
+        if symbolChanged || !wire.pianoNotes.isEmpty {
+            lastSentLiveSymbol = wire.liveChordSymbol
+            liveBroadcastCoalesceTask?.cancel()
+            liveBroadcastCoalesceTask = nil
+            pendingLiveBroadcast = nil
+            sendEncoded(data, to: peers, mode: mode)
+        } else {
+            pendingLiveBroadcast = (data, peers)
+            scheduleLiveBroadcastCoalesce(delayMs: 12)
+        }
+    }
+
+    func broadcast(_ payload: SessionSyncPayload, mode: MCSessionSendDataMode = .reliable) {
+        guard isHost, let session, !session.connectedPeers.isEmpty else { return }
+        guard let data = SessionMessageCodec.encode(.state(payload)) else { return }
+        let peers = session.connectedPeers
+        if mode == .unreliable {
+            pendingLiveBroadcast = (data, peers)
+            scheduleLiveBroadcastCoalesce(delayMs: 12)
+            return
+        }
+        sendEncoded(data, to: peers, mode: mode)
     }
 
     func sendControlRequest(_ action: SessionControlAction) {
@@ -268,13 +307,76 @@ final class SessionManager: NSObject {
     }
 
     private func send(_ message: SessionMessage, to peers: [MCPeerID], mode: MCSessionSendDataMode) {
+        guard let data = SessionMessageCodec.encode(message) else { return }
+        sendEncoded(data, to: peers, mode: mode)
+    }
+
+    private func sendEncoded(_ data: Data, to peers: [MCPeerID], mode: MCSessionSendDataMode) {
         guard let session, !peers.isEmpty else { return }
         do {
-            let data = try JSONEncoder().encode(message)
             try session.send(data, toPeers: peers, with: mode)
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    private func scheduleLiveBroadcastCoalesce(delayMs: UInt64 = 12) {
+        guard liveBroadcastCoalesceTask == nil else { return }
+        liveBroadcastCoalesceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(delayMs))
+            guard let self else { return }
+            self.liveBroadcastCoalesceTask = nil
+            guard self.session != nil, let pending = self.pendingLiveBroadcast else { return }
+            self.pendingLiveBroadcast = nil
+            self.sendEncoded(pending.data, to: pending.peers, mode: .unreliable)
+        }
+    }
+
+    private func enqueueReceivedPacket(_ data: Data, from peer: MCPeerID) {
+        guard session != nil else { return }
+        if Self.packetContainsLiveChordPayload(data) {
+            guard let message = SessionMessageCodec.decode(data) else { return }
+            handleReceived(message, from: peer)
+            return
+        }
+        if Self.packetContainsStatePayload(data) {
+            pendingStatePacket = data
+            pendingStatePeer = peer
+            scheduleReceiveCoalesce()
+            return
+        }
+        guard let message = SessionMessageCodec.decode(data) else { return }
+        handleReceived(message, from: peer)
+    }
+
+    private func scheduleReceiveCoalesce() {
+        guard receiveCoalesceTask == nil else { return }
+        receiveCoalesceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(12))
+            guard let self else { return }
+            self.receiveCoalesceTask = nil
+            guard self.session != nil,
+                  let data = self.pendingStatePacket,
+                  let peer = self.pendingStatePeer else { return }
+            self.pendingStatePacket = nil
+            self.pendingStatePeer = nil
+            guard let message = SessionMessageCodec.decode(data) else { return }
+            self.handleReceived(message, from: peer)
+        }
+    }
+
+    private static func packetContainsLiveChordPayload(_ data: Data) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return json["liveChord"] != nil
+    }
+
+    private static func packetContainsStatePayload(_ data: Data) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return json["state"] != nil
     }
 
     private func handleTimeSyncResponse(_ ping: TimeSyncPing) {
@@ -298,9 +400,20 @@ final class SessionManager: NSObject {
     }
 
     private func stopAll(clearHostPeer: Bool = false) {
+        suppressGuestDisconnectNotification = true
         calibrationTask?.cancel()
         calibrationTask = nil
+        receiveCoalesceTask?.cancel()
+        receiveCoalesceTask = nil
+        pendingStatePacket = nil
+        pendingStatePeer = nil
+        liveBroadcastCoalesceTask?.cancel()
+        liveBroadcastCoalesceTask = nil
+        pendingLiveBroadcast = nil
+        lastSentLiveSymbol = nil
         rejectAllPendingInvitations()
+        isInviting = false
+        connectedPeers = []
         advertiser?.stopAdvertisingPeer()
         advertiser = nil
         browser?.stopBrowsingForPeers()
@@ -311,20 +424,33 @@ final class SessionManager: NSObject {
         if clearHostPeer {
             hostPeer = nil
         }
+        suppressGuestDisconnectNotification = false
+    }
+
+    private func isActiveSession(_ session: MCSession) -> Bool {
+        guard let active = self.session else { return false }
+        return session === active
     }
 }
 
 extension SessionManager: MCSessionDelegate {
     nonisolated func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self, self.isActiveSession(session) else { return }
+            let hadPeers = !connectedPeers.isEmpty
             connectedPeers = session.connectedPeers
+
+            if state == .connected || state == .notConnected {
+                isInviting = false
+            }
+
             if session.connectedPeers.isEmpty {
                 switch connectionState {
                 case .hosting: connectionState = .hosting
                 case .browsing: connectionState = .browsing
                 default: connectionState = .idle
                 }
-                if !isHost {
+                if !isHost, hadPeers, !suppressGuestDisconnectNotification {
                     syncQuality = .unknown
                     onGuestDisconnected?()
                 }
@@ -339,21 +465,28 @@ extension SessionManager: MCSessionDelegate {
     }
 
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        Task { @MainActor in
-            guard let message = try? JSONDecoder().decode(SessionMessage.self, from: data) else { return }
-            switch message {
-            case .state(let payload):
-                onPayloadReceived?(payload)
-            case .timeSyncRequest(let ping):
-                var reply = ping
-                reply.hostEpoch = Date().timeIntervalSince1970
-                send(.timeSyncResponse(reply), to: [peerID], mode: .unreliable)
-            case .timeSyncResponse(let ping):
-                handleTimeSyncResponse(ping)
-            case .controlRequest(let action):
-                if isHost {
-                    onControlRequest?(action, peerID)
-                }
+        let packet = data
+        let peer = peerID
+        Task { @MainActor [weak self] in
+            self?.enqueueReceivedPacket(packet, from: peer)
+        }
+    }
+
+    private func handleReceived(_ message: SessionMessage, from peerID: MCPeerID) {
+        switch message {
+        case .state(let payload):
+            onPayloadReceived?(payload)
+        case .liveChord(let wire):
+            onLiveChordReceived?(wire)
+        case .timeSyncRequest(let ping):
+            var reply = ping
+            reply.hostEpoch = Date().timeIntervalSince1970
+            send(.timeSyncResponse(reply), to: [peerID], mode: .unreliable)
+        case .timeSyncResponse(let ping):
+            handleTimeSyncResponse(ping)
+        case .controlRequest(let action):
+            if isHost {
+                onControlRequest?(action, peerID)
             }
         }
     }
@@ -371,14 +504,20 @@ extension SessionManager: MCNearbyServiceAdvertiserDelegate {
     }
 
     nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else {
+                invitationHandler(false, nil)
+                return
+            }
             if requireHostApproval {
                 pendingInvitations[peerID.displayName] = invitationHandler
                 if !pendingJoinRequests.contains(where: { $0.peer.displayName == peerID.displayName }) {
                     pendingJoinRequests.append(PendingJoinRequest(peer: peerID, receivedAt: Date()))
                 }
+            } else if let activeSession = session {
+                invitationHandler(true, activeSession)
             } else {
-                invitationHandler(true, session)
+                invitationHandler(false, nil)
             }
         }
     }

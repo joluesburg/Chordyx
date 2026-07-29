@@ -8,6 +8,7 @@ import Foundation
 enum SessionPerformanceMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case rehearsal
     case live
+    case acoustic
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ enum SessionPerformanceMode: String, Codable, CaseIterable, Identifiable, Sendab
         switch self {
         case .rehearsal: String(localized: "Rehearsal")
         case .live: String(localized: "Live")
+        case .acoustic: String(localized: "Acoustic")
         }
     }
 
@@ -22,6 +24,7 @@ enum SessionPerformanceMode: String, Codable, CaseIterable, Identifiable, Sendab
         switch self {
         case .rehearsal: String(localized: "Full chart, edit-friendly")
         case .live: String(localized: "Minimal stage view")
+        case .acoustic: String(localized: "Small group · no network required")
         }
     }
 }
@@ -30,6 +33,9 @@ enum SessionDisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case ring
     case stage
     case chart
+    case director
+    case audience
+    case congregation
 
     var id: String { rawValue }
 
@@ -38,6 +44,9 @@ enum SessionDisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .ring: String(localized: "Ring")
         case .stage: String(localized: "Stage")
         case .chart: String(localized: "Lyrics Chart")
+        case .director: String(localized: "Director")
+        case .audience: String(localized: "Audience")
+        case .congregation: String(localized: "Congregation")
         }
     }
 }
@@ -109,6 +118,13 @@ enum SessionControlAction: Codable, Equatable, Sendable {
     case setActiveChord(UUID)
     case sendCue(LiveCue)
     case passControl(String)
+    case toggleMetronome
+    case tempoNudge(Int)
+    case requestHostHandoff(String)
+    case silentNudge(SilentNudgeKind)
+    case reportChordPosition(UUID)
+    /// Band chat — allowed from any connected guest (host relays to everyone).
+    case postBandChat(SessionQuickMessage)
 }
 
 /// How a guest prefers to view the session (local only).
@@ -118,6 +134,7 @@ enum GuestViewRole: String, Codable, CaseIterable, Identifiable, Sendable {
     case bass
     case keys
     case drums
+    case guitar
 
     var id: String { rawValue }
 
@@ -128,6 +145,7 @@ enum GuestViewRole: String, Codable, CaseIterable, Identifiable, Sendable {
         case .bass: String(localized: "Bass — Nashville numbers")
         case .keys: String(localized: "Keys — chord ring")
         case .drums: String(localized: "Drums — section & tempo")
+        case .guitar: String(localized: "Guitar — capo & shapes")
         }
     }
 
@@ -138,12 +156,13 @@ enum GuestViewRole: String, Codable, CaseIterable, Identifiable, Sendable {
         case .bass: .stage
         case .keys: .ring
         case .drums: .stage
+        case .guitar: .ring
         }
     }
 
     var preferredNotation: ChordNotation? {
         switch self {
-        case .auto, .vocal, .keys: nil
+        case .auto, .vocal, .keys, .guitar: nil
         case .bass: .nashville
         case .drums: nil
         }

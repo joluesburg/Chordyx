@@ -8,6 +8,9 @@ import MultipeerConnectivity
 import Observation
 #if os(iOS)
 import UIKit
+import AudioToolbox
+#elseif os(macOS)
+import AppKit
 #endif
 
 @Observable
@@ -44,7 +47,8 @@ final class SessionViewModel {
     static let soloTempoProposalFallbackDelay: TimeInterval = 18
     static let soloTempoDriftMinDelta = 6.0
     static let soloTempoDriftSampleCount = 4
-    var soloDrumsMetronomeSilenced = false
+    /// True after Solo Drums auto-armed a synced metronome for this lock cycle.
+    var soloDrumsMetronomeArmed = false
     var lastHostLiveGroovePayloadSync: TimeInterval = 0
     static let hostLiveGroovePayloadSyncThrottle: TimeInterval = 0.45
     var serviceLearningEnabled = false
@@ -84,6 +88,10 @@ final class SessionViewModel {
     private var outboundSyncNeedsFull = false
     private var outboundSyncLivePending = false
     private var hostKeepAliveTask: Task<Void, Never>?
+    private var hostStartTask: Task<Void, Never>?
+    /// True after `isInSession` until SessionView appears and finishes Multipeer/services.
+    private var hostActivationPending = false
+    private var pendingHostStart: PendingHostStart?
     private var lastSyncedLiveChordSymbol: String?
     private var liveWireRevision: UInt64 = 0
     private var lastAppliedLiveWireRevision: UInt64 = 0
@@ -136,6 +144,14 @@ final class SessionViewModel {
     var isInSession = false
     var isPracticeMode = false
     var role: SessionRole = .none
+    /// Guest-side optimistic chat rows until the host echoes them back.
+    var pendingBandChatMessages: [SessionQuickMessage] = []
+    var bandChatStatusMessage: String?
+    /// Brief banner text when chat is closed (clears automatically).
+    var bandChatToastText: String?
+    /// True while the band chat sheet is on screen (suppresses toast).
+    var isBandChatPresented = false
+    private var bandChatToastTask: Task<Void, Never>?
     #if os(iOS)
     private(set) var isAppInBackground = false
     private var backgroundRefreshTask: Task<Void, Never>?
@@ -321,6 +337,11 @@ final class SessionViewModel {
 
     /// Incremented when notation is cycled so chord labels refresh without waiting for a new chord.
     private(set) var displayNotationVersion = 0
+
+    /// Call after My Chart / local spelling changes so Latin labels recompute.
+    func refreshLocalDisplaySettings() {
+        displayNotationVersion += 1
+    }
 
     func displayNotation(isGuest: Bool) -> ChordNotation {
         _ = displayNotationVersion
@@ -508,6 +529,8 @@ final class SessionViewModel {
         case .reportChordPosition(let chordID):
             payload.peerChordPositions[peer.displayName] = chordID
             refreshPeerPresence()
+        case .postBandChat(let message):
+            appendBandChat(message, trustedSenderName: peer.displayName)
         default:
             guard payload.coHostPeerName == peer.displayName else { return }
             applyControlAction(action)
@@ -516,8 +539,13 @@ final class SessionViewModel {
 
     private func handleRemoteControlRequest(_ action: SessionControlAction, from guestName: String) {
         guard role == .host else { return }
-        guard payload.coHostPeerName == guestName else { return }
-        applyControlAction(action)
+        switch action {
+        case .postBandChat(let message):
+            appendBandChat(message, trustedSenderName: guestName)
+        default:
+            guard payload.coHostPeerName == guestName else { return }
+            applyControlAction(action)
+        }
     }
 
     private func applyGuestPayload(_ received: SessionSyncPayload, fromRemote: Bool) {
@@ -532,16 +560,26 @@ final class SessionViewModel {
         let priorMetronomeSignature = payload.metronomeSyncSignature()
         let priorRoles = payload.guestRoleAssignments
         let priorHostGrooveSignature = payload.hostLiveGrooveGuestSignature()
+        let priorChat = payload.bandChatMessages
 
         let mergedPayload: SessionSyncPayload
         if received.isLiveChordBurst(comparedTo: payload) {
             mergedPayload = payload.applyingLiveBurst(from: received)
+            if mergedPayload == payload { return }
+        } else if received.looksLikeHighFrequencyPeerSyncStrip(comparedTo: payload) {
+            // Keep chat / chart state when a stripped live cloud publish arrives.
+            var preserved = payload.applyingLiveBurst(from: received)
+            preserved.bandChatMessages = payload.bandChatMessages
+            preserved.quickMessages = payload.quickMessages
+            mergedPayload = preserved
             if mergedPayload == payload { return }
         } else {
             mergedPayload = received
         }
 
         payload = mergedPayload
+        prunePendingBandChat()
+        notifyNewBandChatMessages(previous: priorChat, current: mergedPayload.bandChatMessages)
         if role == .guest, mergedPayload.hostLiveGrooveActive {
             payload.tempoDriftBPM = 0
         }
@@ -657,6 +695,8 @@ final class SessionViewModel {
             deliverSilentNudge(kind)
         case .reportChordPosition(let chordID):
             reportGuestChordPosition(chordID)
+        case .postBandChat(let message):
+            appendBandChat(message, trustedSenderName: message.senderName)
         }
     }
 
@@ -824,6 +864,12 @@ final class SessionViewModel {
             if resolved == nil, let index = indices.min() {
                 resolved = singleNoteSymbol(for: index)
             }
+            // If a candidate still conflicts with an octave bass shell, reconcile to the voicing.
+            resolved = ChordRecognizer.reconcileSymbolWithVoicing(
+                notes: indices,
+                chordSymbol: resolved,
+                preferFlats: preferFlats
+            )
             symbol = resolved
         }
         payload.liveChordSymbol = symbol
@@ -1016,12 +1062,7 @@ final class SessionViewModel {
         refreshLibraryKeyHints(from: libraryStore)
         if payload.autoDetectKey {
             startPeriodicKeyReviewIfNeeded()
-            // Defer mic — SessionView appear often coincides with Host Setup dismiss.
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(350))
-                guard self.isInSession, self.payload.autoDetectKey else { return }
-                self.refreshAudioKeyAssistPolicy()
-            }
+            // Mic is opened by schedulePostHostActivation — avoid a second race on appear.
         }
     }
 
@@ -1356,6 +1397,94 @@ final class SessionViewModel {
         activateSessionBackgroundServices()
     }
 
+    /// Staged Host Setup request — committed only after the setup cover fully dismisses.
+    enum PendingHostStart: Equatable {
+        case progression(
+            name: String,
+            key: MusicalKey,
+            notation: ChordNotation,
+            performanceMode: SessionPerformanceMode,
+            autoDetectKey: Bool
+        )
+        case liveChords(
+            name: String,
+            key: MusicalKey,
+            notation: ChordNotation,
+            autoDetectKey: Bool
+        )
+    }
+
+    /// Stage a host start from Host Setup. Call `commitPendingHostStartIfNeeded()` from the cover's onDismiss.
+    func preparePendingHostStart(_ pending: PendingHostStart, libraryStore: ProgressionStore) {
+        refreshLibraryKeyHints(from: libraryStore)
+        pendingHostStart = pending
+    }
+
+    /// Commit a staged host start once Host Setup is fully gone (no nested presentations).
+    func commitPendingHostStartIfNeeded() {
+        guard let pending = pendingHostStart else { return }
+        pendingHostStart = nil
+        switch pending {
+        case let .progression(name, key, notation, performanceMode, autoDetectKey):
+            hostSession(
+                name: name,
+                key: key,
+                notation: notation,
+                performanceMode: performanceMode,
+                autoDetectKey: autoDetectKey
+            )
+        case let .liveChords(name, key, notation, autoDetectKey):
+            hostLiveChordsSession(
+                name: name,
+                key: key,
+                notation: notation,
+                autoDetectKey: autoDetectKey
+            )
+        }
+    }
+
+    /// Queue a host start from Host Setup after dismiss — Task must live on the view model
+    /// so SwiftUI sheet teardown cannot cancel it (otherwise Start appears to do nothing).
+    func queueHostSession(
+        name: String,
+        key: MusicalKey,
+        notation: ChordNotation,
+        performanceMode: SessionPerformanceMode,
+        autoDetectKey: Bool,
+        libraryStore: ProgressionStore
+    ) {
+        preparePendingHostStart(
+            .progression(
+                name: name,
+                key: key,
+                notation: notation,
+                performanceMode: performanceMode,
+                autoDetectKey: autoDetectKey
+            ),
+            libraryStore: libraryStore
+        )
+        commitPendingHostStartIfNeeded()
+    }
+
+    func queueHostLiveChordsSession(
+        name: String,
+        key: MusicalKey,
+        notation: ChordNotation,
+        autoDetectKey: Bool,
+        libraryStore: ProgressionStore
+    ) {
+        preparePendingHostStart(
+            .liveChords(
+                name: name,
+                key: key,
+                notation: notation,
+                autoDetectKey: autoDetectKey
+            ),
+            libraryStore: libraryStore
+        )
+        commitPendingHostStartIfNeeded()
+    }
+
     func hostSession(
         name: String,
         key: MusicalKey,
@@ -1385,9 +1514,9 @@ final class SessionViewModel {
         role = .host
         isInSession = true
         metronome.stop()
-        // Present Session UI first; Multipeer / Live Activity / audio after the cover settles
-        // so iPhone doesn't freeze on com.apple.main-thread during transition.
-        schedulePostHostActivation(named: name, autoDetectKey: autoDetectKey)
+        hostActivationPending = true
+        pushWatchUpdate()
+        // Multipeer / Live Activity / mic wait for SessionView.onAppear → completeHostActivationIfNeeded()
     }
 
     /// Host a freestyle session — guests see only the current live chord (piano/MIDI), with no next-chord preview.
@@ -1419,31 +1548,41 @@ final class SessionViewModel {
         role = .host
         isInSession = true
         metronome.stop()
-        schedulePostHostActivation(named: name, autoDetectKey: autoDetectKey)
+        hostActivationPending = true
+        pushWatchUpdate()
+    }
+
+    /// Called from SessionView.onAppear — starts Multipeer only after UI is on screen and interactive.
+    func completeHostActivationIfNeeded() {
+        guard hostActivationPending, isInSession, role == .host else { return }
+        hostActivationPending = false
+        let name = payload.sessionName
+        let wantsAutoKey = payload.autoDetectKey
+
+        // Yield one frame so SwiftUI can finish layout before Multipeer / audio work.
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self, self.isInSession, self.role == .host else { return }
+            self.beginHostingSession(named: name)
+            self.activateSessionBackgroundServices()
+            if wantsAutoKey {
+                self.startPeriodicKeyReviewIfNeeded()
+                // Do NOT open the mic automatically — AVAudioSession/engine during host start
+                // freezes iPhone. Auto-key still works from piano/MIDI chords; mic assist is opt-in later.
+            }
+        }
     }
 
     /// Finish hosting work after SwiftUI has a chance to present SessionView.
     private func schedulePostHostActivation(named name: String, autoDetectKey: Bool) {
+        hostActivationPending = true
         pushWatchUpdate()
+        // Kept for older call sites; prefer completeHostActivationIfNeeded() from SessionView.
         Task { @MainActor [weak self] in
-            #if os(iOS)
-            try? await Task.sleep(for: .milliseconds(350))
-            #else
-            try? await Task.sleep(for: .milliseconds(120))
-            #endif
-            guard let self, self.isInSession, self.role == .host else { return }
-            self.beginHostingSession(named: name)
-            self.activateSessionBackgroundServices()
-            if autoDetectKey {
-                self.startPeriodicKeyReviewIfNeeded()
-                #if os(iOS)
-                try? await Task.sleep(for: .milliseconds(500))
-                #else
-                try? await Task.sleep(for: .milliseconds(350))
-                #endif
-                guard self.isInSession, self.payload.autoDetectKey else { return }
-                self.refreshAudioKeyAssistPolicy()
-            }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self else { return }
+            self.completeHostActivationIfNeeded()
         }
     }
 
@@ -2395,17 +2534,18 @@ final class SessionViewModel {
 
     func toggleMetronome() {
         guard canDriveSession else { return }
-        #if os(macOS) || os(iOS)
-        if !payload.isMetronomePlaying, soloAccompanimentEnabled, isSoloDrumGroovePlaying {
-            return
-        }
-        #endif
         if payload.isMetronomePlaying {
             payload.isMetronomePlaying = false
             payload.metronomeStartEpoch = nil
             payload.isCountingIn = false
             payload.countInStartEpoch = nil
         } else {
+            #if os(macOS) || os(iOS)
+            if soloAccompanimentEnabled, isSoloDrumGroovePlaying {
+                startSyncedMetronomeWithSoloDrums()
+                return
+            }
+            #endif
             let now = Date().timeIntervalSince1970
             payload.isMetronomePlaying = true
             if payload.countInBars > 0 {
@@ -2428,6 +2568,25 @@ final class SessionViewModel {
         let clamped = min(max(bpm, Self.minBPM), Self.maxBPM).rounded()
         guard clamped != payload.tempoBPM else { return }
         payload.tempoBPM = clamped
+        #if os(macOS) || os(iOS)
+        if soloAccompanimentEnabled, soloTempoLocked {
+            soloLockedBPM = clamped
+            drumAccompaniment.retimeLockedGroove(to: clamped)
+            if soloBassEnabled, autoBandMode.includesBass {
+                bassAccompaniment.stop(force: true)
+                startBassAccompanimentIfNeeded(at: clamped)
+            }
+            if payload.isMetronomePlaying {
+                alignMetronomeEpochToSoloGroove()
+                payload.isCountingIn = false
+                payload.countInStartEpoch = nil
+            }
+            applyMetronome()
+            syncHostLiveGrooveToPayload(force: true)
+            sync()
+            return
+        }
+        #endif
         if payload.isMetronomePlaying {
             let now = Date().timeIntervalSince1970
             if payload.countInBars > 0, !payload.isCountingIn {
@@ -2447,6 +2606,16 @@ final class SessionViewModel {
         guard canDriveSession else { return }
         payload.beatsPerBar = max(1, beats)
         payload.beatUnit = max(1, unit)
+        #if os(macOS) || os(iOS)
+        if soloAccompanimentEnabled, isSoloDrumGroovePlaying, payload.isMetronomePlaying {
+            alignMetronomeEpochToSoloGroove()
+            payload.isCountingIn = false
+            payload.countInStartEpoch = nil
+            applyMetronome()
+            sync()
+            return
+        }
+        #endif
         if payload.isMetronomePlaying, !payload.isCountingIn {
             payload.metronomeStartEpoch = Date().timeIntervalSince1970
         }
@@ -2530,13 +2699,6 @@ final class SessionViewModel {
     }
 
     func refreshMetronomeAudioPolicy() {
-        #if os(macOS) || os(iOS)
-        if soloAccompanimentEnabled, soloTempoLocked, isSoloDrumGroovePlaying {
-            metronome.localAudioEnabled = false
-            applyMetronome()
-            return
-        }
-        #endif
         if role == .host || isPracticeMode {
             metronome.localAudioEnabled = true
         } else if role == .guest {
@@ -2690,7 +2852,7 @@ final class SessionViewModel {
         handleExtendedFeatureSectionChange(to: activeSection)
     }
 
-    private func applyMetronome() {
+    func applyMetronome() {
         #if os(iOS)
         let bpm = displayedSessionTempoBPM
         let isPlaying = displayedMetronomePlaying
@@ -2720,7 +2882,7 @@ final class SessionViewModel {
             if soloAccompanimentEnabled {
                 if drumAccompaniment.isPlaying { return true }
                 if bassAccompaniment.isPlaying { return true }
-                if livePerformanceFusion.isAudioListening { return true }
+                // Mic capture owns AVAudioSession while listening — don't fight it via metronome keep-alive.
             }
             if role == .host { return false }
             return isInSession && isAppInBackground
@@ -2759,6 +2921,10 @@ final class SessionViewModel {
         outboundSyncImmediate = false
         hostKeepAliveTask?.cancel()
         hostKeepAliveTask = nil
+        hostStartTask?.cancel()
+        hostStartTask = nil
+        hostActivationPending = false
+        pendingHostStart = nil
         groovePreviewTask?.cancel()
         groovePreviewTask = nil
         lastSyncedLiveChordSymbol = nil
@@ -2775,6 +2941,12 @@ final class SessionViewModel {
             cloudRelay.stopAll()
         }
         isRemoteLinkActive = false
+        pendingBandChatMessages = []
+        bandChatStatusMessage = nil
+        bandChatToastTask?.cancel()
+        bandChatToastTask = nil
+        bandChatToastText = nil
+        isBandChatPresented = false
         // Dismiss session UI before tearing down Multipeer so SwiftUI is not
         // still observing connectedPeers while SF Symbol layers animate away.
         isInSession = false
@@ -2850,13 +3022,18 @@ final class SessionViewModel {
         setScreenAlwaysOn(true)
         metronome.setSessionKeepAlive(false)
         #if os(iOS)
-        // Solo Drums hosting is Mac-only; clear any leftover iPhone host state.
-        if soloAccompanimentEnabled {
+        // iPhone remains guest-only for Solo host; iPad may host Solo Drums.
+        if PlatformDevice.isPhone, soloAccompanimentEnabled {
             setSoloAccompanimentEnabled(false)
         }
         #endif
         refreshSessionAudioPolicy()
-        LiveActivityManager.update(from: self, force: true)
+        // Live Activity can stall the main thread if requested mid-transition.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard let self, self.isInSession else { return }
+            LiveActivityManager.update(from: self, force: true)
+        }
         if role == .host {
             startHostSyncKeepAlive()
         }
@@ -3426,6 +3603,156 @@ extension SessionViewModel {
             guard let self else { return }
             self.payload.quickMessages.removeAll { $0.id == message.id }
             self.sync()
+        }
+    }
+
+    /// Newest-first messages for the band chat UI (includes guest pending sends).
+    var displayedBandChatMessages: [SessionQuickMessage] {
+        let confirmedIDs = Set(payload.bandChatMessages.map(\.id))
+        let cutoff = Date().timeIntervalSince1970 - BandChatLimits.pendingTimeoutSeconds
+        let pending = pendingBandChatMessages.filter {
+            !confirmedIDs.contains($0.id) && $0.sentAt >= cutoff
+        }
+        return pending + payload.bandChatMessages
+    }
+
+    /// Band chat for host + all guests. Opens from a sheet — never overlays the live stage.
+    @discardableResult
+    func sendBandChat(_ text: String, symbol: String = "bubble.left.fill") -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let clipped = String(trimmed.prefix(BandChatLimits.maxTextLength))
+        let message = SessionQuickMessage(
+            senderName: SessionManager.currentDisplayName(),
+            text: clipped,
+            symbol: symbol
+        )
+        bandChatStatusMessage = nil
+
+        if role == .host || isPracticeMode {
+            appendBandChat(message, trustedSenderName: message.senderName)
+            return true
+        }
+
+        guard isInSession, role == .guest else {
+            bandChatStatusMessage = String(localized: "Join a session to chat with the band.")
+            return false
+        }
+
+        let canSendLocally = !sessionManager.connectedPeers.isEmpty
+        let canSendRemotely = isRemoteLinkActive && payload.remoteJoinCode != nil
+        guard canSendLocally || canSendRemotely else {
+            bandChatStatusMessage = String(localized: "Not connected — message not sent.")
+            return false
+        }
+
+        // Show immediately; drop when the host echoes the same id.
+        pendingBandChatMessages.insert(message, at: 0)
+        if pendingBandChatMessages.count > 12 {
+            pendingBandChatMessages = Array(pendingBandChatMessages.prefix(12))
+        }
+
+        // Prefer Multipeer; also relay over internet when available (host dedupes by message id).
+        if canSendLocally {
+            sessionManager.sendControlRequest(.postBandChat(message))
+        }
+        if canSendRemotely, let code = payload.remoteJoinCode {
+            Task {
+                await cloudRelay.sendControl(
+                    action: .postBandChat(message),
+                    joinCode: code,
+                    guestName: SessionManager.currentDisplayName()
+                )
+            }
+        }
+        return true
+    }
+
+    private func appendBandChat(_ message: SessionQuickMessage, trustedSenderName: String) {
+        guard role == .host || isPracticeMode else { return }
+        var stamped = message
+        let sender = trustedSenderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sender.isEmpty {
+            stamped.senderName = sender
+        }
+        let text = stamped.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        stamped.text = String(text.prefix(BandChatLimits.maxTextLength))
+
+        // Avoid duplicates if the same control packet is delivered twice.
+        if payload.bandChatMessages.contains(where: { $0.id == stamped.id }) {
+            return
+        }
+
+        payload.bandChatMessages.insert(stamped, at: 0)
+        if payload.bandChatMessages.count > BandChatLimits.maxMessages {
+            payload.bandChatMessages = Array(payload.bandChatMessages.prefix(BandChatLimits.maxMessages))
+        }
+        sync()
+        // Host hears guest posts (not their own).
+        if stamped.senderName != SessionManager.currentDisplayName() {
+            deliverBandChatAlert(for: stamped)
+        }
+    }
+
+    private func notifyNewBandChatMessages(previous: [SessionQuickMessage], current: [SessionQuickMessage]) {
+        let previousIDs = Set(previous.map(\.id))
+        let myName = SessionManager.currentDisplayName()
+        guard let newest = current.first(where: {
+            !previousIDs.contains($0.id) && $0.senderName != myName
+        }) else { return }
+        deliverBandChatAlert(for: newest)
+    }
+
+    private func deliverBandChatAlert(for message: SessionQuickMessage) {
+        let quietLive = GuestDisplaySettings.bandChatQuietDuringLive
+            && payload.performanceMode.usesCompactStageUI
+        if !quietLive {
+            if GuestDisplaySettings.bandChatHapticsEnabled {
+                #if os(iOS)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #elseif os(macOS)
+                NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .default)
+                #endif
+            }
+            if GuestDisplaySettings.bandChatSoundsEnabled {
+                #if os(iOS)
+                AudioServicesPlaySystemSound(1007) // short SMS-like ping
+                #elseif os(macOS)
+                NSSound(named: "Tink")?.play()
+                #endif
+            }
+            if GuestDisplaySettings.bandChatInAppAlertsEnabled, !isBandChatPresented {
+                let preview = "\(message.senderName): \(message.text)"
+                presentBandChatToast(String(preview.prefix(80)))
+            }
+        }
+    }
+
+    private func presentBandChatToast(_ text: String) {
+        bandChatToastText = text
+        bandChatToastTask?.cancel()
+        bandChatToastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3.2))
+            guard !Task.isCancelled, let self else { return }
+            if self.bandChatToastText == text {
+                self.bandChatToastText = nil
+            }
+        }
+    }
+
+    private func prunePendingBandChat() {
+        let confirmed = Set(payload.bandChatMessages.map(\.id))
+        pendingBandChatMessages.removeAll { confirmed.contains($0.id) }
+        pruneStalePendingBandChat()
+    }
+
+    private func pruneStalePendingBandChat() {
+        let cutoff = Date().timeIntervalSince1970 - BandChatLimits.pendingTimeoutSeconds
+        let before = pendingBandChatMessages.count
+        pendingBandChatMessages.removeAll { $0.sentAt < cutoff }
+        if pendingBandChatMessages.count < before, bandChatStatusMessage == nil {
+            bandChatStatusMessage = String(localized: "Some messages may not have reached the host.")
         }
     }
 

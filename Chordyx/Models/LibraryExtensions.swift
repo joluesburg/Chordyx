@@ -16,6 +16,9 @@ struct SectionMarker: Identifiable, Codable, Equatable, Hashable, Sendable {
     var lyrics: String
     var kind: WorshipSectionKind
     var repeatCount: Int
+    var autoCueText: String?
+    var autoCueSymbol: String?
+    var autoCueTrigger: SectionCueTrigger?
 
     init(
         id: UUID = UUID(),
@@ -23,7 +26,10 @@ struct SectionMarker: Identifiable, Codable, Equatable, Hashable, Sendable {
         startChordID: UUID,
         lyrics: String = "",
         kind: WorshipSectionKind = .custom,
-        repeatCount: Int = 1
+        repeatCount: Int = 1,
+        autoCueText: String? = nil,
+        autoCueSymbol: String? = nil,
+        autoCueTrigger: SectionCueTrigger? = nil
     ) {
         self.id = id
         self.name = name
@@ -31,10 +37,14 @@ struct SectionMarker: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.lyrics = lyrics
         self.kind = kind
         self.repeatCount = max(1, repeatCount)
+        self.autoCueText = autoCueText
+        self.autoCueSymbol = autoCueSymbol
+        self.autoCueTrigger = autoCueTrigger
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, startChordID, lyrics, kind, repeatCount
+        case autoCueText, autoCueSymbol, autoCueTrigger
     }
 
     init(from decoder: Decoder) throws {
@@ -45,6 +55,9 @@ struct SectionMarker: Identifiable, Codable, Equatable, Hashable, Sendable {
         lyrics = try container.decodeIfPresent(String.self, forKey: .lyrics) ?? ""
         kind = try container.decodeIfPresent(WorshipSectionKind.self, forKey: .kind) ?? .custom
         repeatCount = max(1, try container.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1)
+        autoCueText = try container.decodeIfPresent(String.self, forKey: .autoCueText)
+        autoCueSymbol = try container.decodeIfPresent(String.self, forKey: .autoCueSymbol)
+        autoCueTrigger = try container.decodeIfPresent(SectionCueTrigger.self, forKey: .autoCueTrigger)
     }
 }
 
@@ -110,11 +123,12 @@ struct PendingJoinRequest: Identifiable, Equatable, Sendable {
     var id: String { peer.displayName }
 }
 
-enum SyncQuality: String, Sendable {
+enum SyncQuality: String, Codable, Sendable {
     case unknown
     case good
     case fair
     case poor
+    case remote
 
     var label: String {
         switch self {
@@ -122,6 +136,7 @@ enum SyncQuality: String, Sendable {
         case .good: String(localized: "Sync OK")
         case .fair: String(localized: "Sync fair")
         case .poor: String(localized: "Sync weak")
+        case .remote: String(localized: "Internet backup")
         }
     }
 

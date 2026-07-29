@@ -57,6 +57,15 @@ final class MetronomeEngine {
     /// When false, timing still runs but no click is heard (guest local mute).
     var localAudioEnabled: Bool = true
 
+    /// Route metronome to headphones when plugged in instead of forcing the speaker.
+    var preferHeadphoneOutput: Bool = false {
+        didSet {
+            #if os(iOS)
+            configureAudioSessionCategory()
+            #endif
+        }
+    }
+
     var onBeat: ((Int, Bool, Bool) -> Void)?
 
     private let engine = AVAudioEngine()
@@ -71,6 +80,7 @@ final class MetronomeEngine {
     private var didConfigureAudio = false
     private var keepAliveActive = false
     private var keepAliveLoopScheduled = false
+    private var audioSessionIsActive = false
     #if os(iOS)
     private let audioInterruptionObserver: AudioInterruptionObserver
     #endif
@@ -129,6 +139,12 @@ final class MetronomeEngine {
             isRunning = false
             self.isCountingIn = false
             currentBeat = -1
+            #if os(iOS)
+            if localAudioEnabled {
+                activateAudioSession(audible: false)
+            }
+            #endif
+            releaseAudioSessionIfIdle()
         }
     }
 
@@ -140,14 +156,16 @@ final class MetronomeEngine {
         countInBeatsRemaining = 0
         currentBeat = -1
         setSessionKeepAlive(false)
+        releaseAudioSessionIfIdle()
     }
 
     /// Re-starts audio output after backgrounding or an interruption so the session
     /// keeps running while the phone is locked.
     func reassertBackgroundPlayback() {
         guard keepAliveActive || isRunning else { return }
+        guard !engine.isRunning else { return }
         configureAudioIfNeeded()
-        activateAudioSession()
+        activateAudioSession(audible: isRunning && localAudioEnabled)
         guard restartEngineIfNeeded() else { return }
         if keepAliveActive {
             keepAliveLoopScheduled = false
@@ -167,19 +185,37 @@ final class MetronomeEngine {
         } else {
             keepAliveLoopScheduled = false
             keepAlivePlayer.stop()
-            #if os(iOS)
-            if !isRunning {
-                clickPlayer.stop()
-                engine.stop()
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            }
-            #endif
+            releaseAudioSessionIfIdle()
         }
+    }
+
+    private func releaseAudioSessionIfIdle() {
+        #if os(iOS)
+        if !isRunning {
+            clickPlayer.stop()
+            if engine.isRunning {
+                engine.stop()
+            }
+            if audioSessionIsActive {
+                try? AVAudioSession.sharedInstance().setActive(
+                    false,
+                    options: .notifyOthersOnDeactivation
+                )
+                audioSessionIsActive = false
+            }
+        }
+        #else
+        if !isRunning, engine.isRunning {
+            clickPlayer.stop()
+            engine.stop()
+        }
+        #endif
     }
 
     private func startTimer(config: Config) {
         guard config.bpm > 0 else { return }
         configureAudioIfNeeded()
+        activateAudioSession(audible: localAudioEnabled)
         ensureEngineRunning()
         isRunning = true
 
@@ -284,7 +320,7 @@ final class MetronomeEngine {
     }
 
     private func ensureEngineRunning() {
-        activateAudioSession()
+        activateAudioSession(audible: isRunning && localAudioEnabled)
         guard restartEngineIfNeeded() else { return }
         scheduleKeepAliveLoopIfNeeded()
     }
@@ -292,17 +328,39 @@ final class MetronomeEngine {
     #if os(iOS)
     private func configureAudioSessionCategory() {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(
-            .playback,
-            mode: .default,
-            options: [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP]
-        )
-        try? session.setActive(true)
-        try? session.overrideOutputAudioPort(.speaker)
+        // Preserve playAndRecord when Solo Audio AI / key assist owns the mic.
+        if session.category == .playAndRecord {
+            try? session.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP]
+            )
+        } else {
+            try? session.setCategory(
+                .playback,
+                mode: .default,
+                options: [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP]
+            )
+        }
     }
 
-    private func activateAudioSession() {
+    /// Activates the audio session only when needed. Never forces speaker routing unless
+    /// the metronome is audibly playing — preserves USB / headphone audio from a connected keyboard.
+    private func activateAudioSession(audible: Bool) {
         configureAudioSessionCategory()
+        guard keepAliveActive || isRunning else { return }
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(true)
+        audioSessionIsActive = true
+        if audible {
+            if preferHeadphoneOutput {
+                try? session.overrideOutputAudioPort(.none)
+            } else {
+                try? session.overrideOutputAudioPort(.speaker)
+            }
+        } else {
+            try? session.overrideOutputAudioPort(.none)
+        }
     }
 
     private func handleAudioInterruption(_ snapshot: AudioInterruptionSnapshot) {
@@ -322,7 +380,7 @@ final class MetronomeEngine {
         }
     }
     #else
-    private func activateAudioSession() {}
+    private func activateAudioSession(audible: Bool = false) {}
     #endif
 
     private func restartEngineIfNeeded() -> Bool {
