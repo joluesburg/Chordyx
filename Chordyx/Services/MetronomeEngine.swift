@@ -41,6 +41,39 @@ private final class AudioInterruptionObserver {
 }
 #endif
 
+/// Pure beat-grid math shared by the click engine (and tests).
+enum MetronomePhaseMath {
+    static func secondsPerBeat(bpm: Double, beatUnit: Int) -> Double {
+        (60.0 / max(1, bpm)) * (4.0 / Double(max(1, beatUnit)))
+    }
+
+    static func absoluteBeatIndex(elapsed: Double, secondsPerBeat: Double) -> Int {
+        guard secondsPerBeat > 0, elapsed >= 0 else { return 0 }
+        return Int(floor(elapsed / secondsPerBeat))
+    }
+
+    static func beatInBar(absoluteBeat: Int, beatsPerBar: Int) -> Int {
+        let bars = max(1, beatsPerBar)
+        return ((absoluteBeat % bars) + bars) % bars
+    }
+
+    /// True when a drum 16th-grid downbeat (step 0 of a 16-step bar) lines up with a click accent.
+    static func drumDownbeatMatchesClickAccent(
+        elapsed: Double,
+        bpm: Double,
+        beatsPerBar: Int = 4,
+        beatUnit: Int = 4
+    ) -> Bool {
+        let spb = secondsPerBeat(bpm: bpm, beatUnit: beatUnit)
+        let beat = absoluteBeatIndex(elapsed: elapsed, secondsPerBeat: spb)
+        guard beatInBar(absoluteBeat: beat, beatsPerBar: beatsPerBar) == 0 else { return false }
+        let sixteenth = spb / 4.0
+        guard sixteenth > 0 else { return false }
+        let step = Int(floor(elapsed / sixteenth))
+        return step % 16 == 0
+    }
+}
+
 @Observable
 @MainActor
 final class MetronomeEngine {
@@ -54,8 +87,15 @@ final class MetronomeEngine {
         didSet { clickPlayer.volume = volume }
     }
 
-    /// When false, timing still runs but no click is heard (guest local mute).
+    /// When false, wall-clock phase / `onBeat` still run but no local click is scheduled.
+    /// Used for guest mute and for Solo Drums click-through (audible click lives on
+    /// `DrumAccompanimentEngine` so kit + click share one AVAudioEngine).
     var localAudioEnabled: Bool = true
+
+    /// Convenience for Solo Drums click-through / silent phase tracking.
+    func setLocalAudioEnabled(_ enabled: Bool) {
+        localAudioEnabled = enabled
+    }
 
     /// Route metronome to headphones when plugged in instead of forcing the speaker.
     var preferHeadphoneOutput: Bool = false {
@@ -81,6 +121,8 @@ final class MetronomeEngine {
     private var keepAliveActive = false
     private var keepAliveLoopScheduled = false
     private var audioSessionIsActive = false
+    /// Last absolute beat index fired from the wall-clock grid (avoids DispatchSource drift).
+    private var lastFiredAbsoluteBeat = -1
     #if os(iOS)
     private let audioInterruptionObserver: AudioInterruptionObserver
     #endif
@@ -218,63 +260,97 @@ final class MetronomeEngine {
         activateAudioSession(audible: localAudioEnabled)
         ensureEngineRunning()
         isRunning = true
+        lastFiredAbsoluteBeat = -1
 
-        let secondsPerBeat = (60.0 / config.bpm) * (4.0 / Double(config.beatUnit))
-        let hostNow = Date().timeIntervalSince1970 + config.clockOffset
+        let secondsPerBeat = MetronomePhaseMath.secondsPerBeat(bpm: config.bpm, beatUnit: config.beatUnit)
+        guard secondsPerBeat > 0 else { return }
 
         let countingIn = config.isCountingIn && config.countInStartEpoch != nil
         isCountingIn = countingIn
         countInBeatsRemaining = countingIn ? config.countInBars * config.beatsPerBar : 0
 
-        let anchorEpoch: Double
-        if countingIn, let countStart = config.countInStartEpoch {
-            anchorEpoch = countStart
-        } else {
-            anchorEpoch = config.startEpoch
-        }
+        // Seed to the current absolute beat so we only fire on upcoming boundaries
+        // (keeps Solo Drums phase lock tight when the click is armed mid-bar).
+        let hostNow = Date().timeIntervalSince1970 + config.clockOffset
+        let seedAnchor = countingIn ? (config.countInStartEpoch ?? config.startEpoch) : config.startEpoch
+        let seedElapsed = max(0, hostNow - seedAnchor)
+        lastFiredAbsoluteBeat = MetronomePhaseMath.absoluteBeatIndex(
+            elapsed: seedElapsed,
+            secondsPerBeat: secondsPerBeat
+        )
 
-        let elapsed = max(0, hostNow - anchorEpoch)
-        let beatsElapsed = floor(elapsed / secondsPerBeat)
-        let nextBeatTime = anchorEpoch + (beatsElapsed + 1) * secondsPerBeat
-        let initialDelay = max(0, nextBeatTime - hostNow)
-
+        // Poll wall-clock like Solo Drums — a repeating beat timer drifts vs the groove grid.
         let source = DispatchSource.makeTimerSource(queue: .main)
-        source.schedule(deadline: .now() + initialDelay, repeating: secondsPerBeat, leeway: .milliseconds(1))
+        source.schedule(deadline: .now(), repeating: .milliseconds(8), leeway: .milliseconds(2))
         source.setEventHandler { [weak self] in
             guard let self else { return }
-            let hostNowTick = Date().timeIntervalSince1970 + config.clockOffset
-
-            if countingIn, let countStart = config.countInStartEpoch {
-                let countElapsed = hostNowTick - countStart
-                let countBeatIndex = Int((countElapsed / secondsPerBeat).rounded())
-                let totalCountBeats = config.countInBars * config.beatsPerBar
-                if countBeatIndex < totalCountBeats {
-                    let beatInBar = ((countBeatIndex % config.beatsPerBar) + config.beatsPerBar) % config.beatsPerBar
-                    self.countInBeatsRemaining = max(1, totalCountBeats - countBeatIndex)
-                    self.clickCountIn(accent: beatInBar == 0)
-                    self.currentBeat = beatInBar
-                    self.onBeat?(beatInBar, beatInBar == 0, true)
-                    return
-                }
-                self.isCountingIn = false
-                self.countInBeatsRemaining = 0
-            }
-
-            let elapsedNow = hostNowTick - config.startEpoch
-            guard elapsedNow >= 0 else { return }
-            let beatIndex = Int((elapsedNow / secondsPerBeat).rounded())
-            let beatInBar = ((beatIndex % config.beatsPerBar) + config.beatsPerBar) % config.beatsPerBar
-            self.click(accent: beatInBar == 0)
-            self.currentBeat = beatInBar
-            self.onBeat?(beatInBar, beatInBar == 0, false)
+            self.tickWallClock(config: config, secondsPerBeat: secondsPerBeat)
         }
         timer = source
         source.resume()
     }
 
+    private func tickWallClock(config: Config, secondsPerBeat: Double) {
+        let hostNow = Date().timeIntervalSince1970 + config.clockOffset
+        let countingInConfigured = config.isCountingIn && config.countInStartEpoch != nil
+
+        if countingInConfigured, let countStart = config.countInStartEpoch, isCountingIn {
+            let countElapsed = hostNow - countStart
+            guard countElapsed >= 0 else { return }
+            let countBeatIndex = MetronomePhaseMath.absoluteBeatIndex(
+                elapsed: countElapsed,
+                secondsPerBeat: secondsPerBeat
+            )
+            let totalCountBeats = config.countInBars * config.beatsPerBar
+            if countBeatIndex < totalCountBeats {
+                guard countBeatIndex > lastFiredAbsoluteBeat else { return }
+                lastFiredAbsoluteBeat = countBeatIndex
+                let beatInBar = MetronomePhaseMath.beatInBar(
+                    absoluteBeat: countBeatIndex,
+                    beatsPerBar: config.beatsPerBar
+                )
+                countInBeatsRemaining = max(1, totalCountBeats - countBeatIndex)
+                clickCountIn(accent: beatInBar == 0)
+                currentBeat = beatInBar
+                onBeat?(beatInBar, beatInBar == 0, true)
+                return
+            }
+            // Hand off to the groove epoch without dumping a burst of clicks.
+            isCountingIn = false
+            countInBeatsRemaining = 0
+            let grooveElapsed = max(0, hostNow - config.startEpoch)
+            lastFiredAbsoluteBeat = MetronomePhaseMath.absoluteBeatIndex(
+                elapsed: grooveElapsed,
+                secondsPerBeat: secondsPerBeat
+            )
+            return
+        }
+
+        let elapsedNow = hostNow - config.startEpoch
+        guard elapsedNow >= 0 else { return }
+        let beatIndex = MetronomePhaseMath.absoluteBeatIndex(
+            elapsed: elapsedNow,
+            secondsPerBeat: secondsPerBeat
+        )
+        guard beatIndex > lastFiredAbsoluteBeat else { return }
+        // Limit catch-up so a long stall doesn't machine-gun clicks.
+        let from = max(lastFiredAbsoluteBeat + 1, beatIndex - 1)
+        for index in from...beatIndex {
+            let beatInBar = MetronomePhaseMath.beatInBar(
+                absoluteBeat: index,
+                beatsPerBar: config.beatsPerBar
+            )
+            click(accent: beatInBar == 0)
+            currentBeat = beatInBar
+            onBeat?(beatInBar, beatInBar == 0, false)
+        }
+        lastFiredAbsoluteBeat = beatIndex
+    }
+
     private func stopTimer() {
         timer?.cancel()
         timer = nil
+        lastFiredAbsoluteBeat = -1
     }
 
     private func configureAudioIfNeeded() {

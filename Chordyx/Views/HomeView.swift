@@ -65,8 +65,10 @@ struct HomeView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 36 : (verticalSizeClass == .compact ? 16 : 24)) {
+                        homeBrandHeader
+                            .padding(.top, PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 12 : 4)
+
                         homeActionMenu
-                            .padding(.top, PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 16 : 8)
 
                         VStack(spacing: 12) {
                             deviceNameRow
@@ -161,6 +163,32 @@ struct HomeView: View {
             #endif
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var homeBrandHeader: some View {
+        HStack(spacing: 14) {
+            ChordyxBrandMark(size: 52, glowOpacity: 0.85)
+                .padding(6)
+                .background(AppTheme.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Chordyx")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text(String(localized: "Live chords for your band"))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Chordyx"))
     }
 
     private var deviceNameRow: some View {
@@ -477,92 +505,180 @@ struct HostSetupView: View {
     @State private var sessionKind: HostSessionKind = .liveChords
     @State private var performanceMode: SessionPerformanceMode = .live
     @State private var keySelectionMode: SessionKeySelectionMode = .auto
+    @FocusState private var nameFieldFocused: Bool
     @AppStorage(SessionManager.requireHostApprovalKey) private var requireHostApproval = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.background.ignoresSafeArea()
+                AppTheme.backgroundGradient.ignoresSafeArea()
+                RadialGradient(
+                    colors: [AppTheme.accentSecondary.opacity(0.16), .clear],
+                    center: .topTrailing,
+                    startRadius: 20,
+                    endRadius: 420
+                )
+                .ignoresSafeArea()
+                RadialGradient(
+                    colors: [AppTheme.accent.opacity(0.08), .clear],
+                    center: .bottomLeading,
+                    startRadius: 10,
+                    endRadius: 360
+                )
+                .ignoresSafeArea()
 
-                Form {
-                    Section {
-                        Picker("Session Type", selection: $sessionKind) {
-                            ForEach(HostSessionKind.allCases) { kind in
-                                Text(kind.label).tag(kind)
-                            }
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(String(localized: "New Session"))
+                                .font(.largeTitle.weight(.bold))
+                                .foregroundStyle(AppTheme.textPrimary)
+                            Text(String(localized: "Choose what guests follow — then start when you’re ready."))
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .pickerStyle(.segmented)
+                        .padding(.top, 4)
 
-                        Text(sessionKind.description)
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } header: {
-                        Text("What are you sharing?")
-                    }
-
-                    Section("Session") {
-                        TextField(L10n.jamSession, text: $sessionName)
-                        Toggle("Approve guests before joining", isOn: $requireHostApproval)
-                    }
-
-                    if sessionKind == .progression {
-                        Section("Performance Mode") {
-                            Picker("Performance Mode", selection: $performanceMode) {
-                                ForEach(SessionPerformanceMode.allCases) { mode in
-                                    Text(mode.label).tag(mode)
+                        HostSetupSection(title: String(localized: "What are you sharing?")) {
+                            HStack(spacing: 12) {
+                                ForEach(HostSessionKind.allCases) { kind in
+                                    HostSetupChoiceCard(
+                                        title: kind.label,
+                                        subtitle: kind.shortLabel,
+                                        systemImage: kind.systemImage,
+                                        isSelected: sessionKind == kind
+                                    ) {
+                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                            sessionKind = kind
+                                        }
+                                    }
                                 }
                             }
-                            Text(performanceMode.subtitle)
+
+                            Text(sessionKind.description)
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
 
-                    Section("Musical Key") {
-                        HostSetupMusicalKeyCard(
-                            mode: $keySelectionMode,
-                            manualKey: $selectedKey,
-                            showsSpellingHint: sessionKind == .liveChords
-                        )
-                    }
+                        HostSetupSection(title: String(localized: "Session")) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(String(localized: "Name"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .textCase(.uppercase)
 
-                    Section("Chord Notation") {
-                        ForEach(ChordNotation.allCases) { notation in
-                            Button {
-                                selectedNotation = notation
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(notation.label)
-                                            .foregroundStyle(AppTheme.textPrimary)
-                                        Text(notation.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(AppTheme.textSecondary)
+                                TextField(L10n.jamSession, text: $sessionName)
+                                    .textFieldStyle(.plain)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(AppTheme.surfaceElevated.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .stroke(
+                                                nameFieldFocused ? AppTheme.accent.opacity(0.7) : Color.white.opacity(0.08),
+                                                lineWidth: nameFieldFocused ? 1.5 : 1
+                                            )
                                     }
-                                    Spacer()
-                                    if selectedNotation == notation {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(AppTheme.accent)
+                                    .focused($nameFieldFocused)
+                            }
+
+                            HostSetupToggleRow(
+                                title: String(localized: "Approve guests before joining"),
+                                subtitle: String(localized: "You’ll confirm each device before they hear the session."),
+                                isOn: $requireHostApproval
+                            )
+                        }
+
+                        if sessionKind == .progression {
+                            HostSetupSection(title: String(localized: "Performance")) {
+                                HStack(spacing: 10) {
+                                    ForEach(SessionPerformanceMode.allCases) { mode in
+                                        HostSetupChip(
+                                            title: mode.label,
+                                            isSelected: performanceMode == mode
+                                        ) {
+                                            withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                                                performanceMode = mode
+                                            }
+                                        }
+                                    }
+                                }
+                                Text(performanceMode.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        HostSetupSection(title: String(localized: "Musical Key")) {
+                            HostSetupModernKeyCard(
+                                mode: $keySelectionMode,
+                                manualKey: $selectedKey,
+                                showsSpellingHint: sessionKind == .liveChords
+                            )
+                        }
+
+                        HostSetupSection(title: String(localized: "Chord Notation")) {
+                            VStack(spacing: 8) {
+                                ForEach(ChordNotation.allCases) { notation in
+                                    HostSetupNotationRow(
+                                        notation: notation,
+                                        isSelected: selectedNotation == notation
+                                    ) {
+                                        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                                            selectedNotation = notation
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        Button {
+                            startSession()
+                        } label: {
+                            Text(String(localized: "Start Session"))
+                                .font(.headline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.black.opacity(0.88))
+                        .background(
+                            LinearGradient(
+                                colors: [AppTheme.accent, AppTheme.accent.opacity(0.82)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        )
+                        .padding(.top, 4)
+                        .padding(.bottom, 12)
                     }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
                 }
-                .scrollContentBackground(.hidden)
             }
-            .navigationTitle("New Session")
+            .navigationTitle(String(localized: "New Session"))
             .platformInlineNavigationTitle()
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(String(localized: "Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Start") {
+                    Button(String(localized: "Start")) {
                         startSession()
                     }
                     .fontWeight(.semibold)
+                    .foregroundStyle(AppTheme.accent)
                 }
             }
         }
@@ -618,10 +734,24 @@ private enum HostSessionKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: LocalizedStringKey {
+    var label: String {
         switch self {
-        case .progression: "Progression"
-        case .liveChords: "Live Piano"
+        case .progression: String(localized: "Progression")
+        case .liveChords: String(localized: "Live Piano")
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .progression: String(localized: "Chart + next chord")
+        case .liveChords: String(localized: "Piano / MIDI live")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .progression: "circle.grid.cross"
+        case .liveChords: "pianokeys"
         }
     }
 
@@ -631,6 +761,222 @@ private enum HostSessionKind: String, CaseIterable, Identifiable {
             String(localized: "Chord ring with next-chord preview. Add chords as you go or load a saved song.")
         case .liveChords:
             String(localized: "Play on piano or MIDI — guests see only the current chord, no next-chord preview.")
+        }
+    }
+}
+
+// MARK: - Host setup chrome
+
+private struct HostSetupSection<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.6)
+
+            VStack(alignment: .leading, spacing: 14) {
+                content
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            }
+        }
+    }
+}
+
+private struct HostSetupChoiceCard: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.accentSecondary)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+            .background(
+                isSelected ? AppTheme.accent.opacity(0.14) : AppTheme.surfaceElevated.opacity(0.55),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        isSelected ? AppTheme.accent.opacity(0.65) : Color.white.opacity(0.06),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct HostSetupChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.black.opacity(0.85) : AppTheme.textPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    isSelected ? AppTheme.accent : AppTheme.surfaceElevated.opacity(0.7),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct HostSetupToggleRow: View {
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(AppTheme.accent)
+    }
+}
+
+private struct HostSetupNotationRow: View {
+    let notation: ChordNotation
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(isSelected ? AppTheme.accent : Color.clear)
+                    .frame(width: 3, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(notation.label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(notation.subtitle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                isSelected ? AppTheme.accent.opacity(0.1) : AppTheme.surfaceElevated.opacity(0.35),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct HostSetupModernKeyCard: View {
+    @Binding var mode: SessionKeySelectionMode
+    @Binding var manualKey: MusicalKey
+    var showsSpellingHint: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ForEach(SessionKeySelectionMode.allCases) { option in
+                    HostSetupChip(
+                        title: option.label,
+                        isSelected: mode == option
+                    ) {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                            mode = option
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            if mode == .auto {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String(localized: "Auto-detect key"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text(String(localized: "AI learns the key from your chord playing once the session starts. Play at least three chords on piano or MIDI."))
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.surfaceElevated.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                PlatformMusicalKeyField(title: "Key", selection: $manualKey, style: .compact)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.surfaceElevated.opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    }
+            }
+
+            if showsSpellingHint {
+                Text(String(localized: "Spells chord names with sharps or flats."))
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
         }
     }
 }

@@ -191,12 +191,31 @@ struct LiveHostControlRail: View {
         .glassCard()
     }
 
-    private func tabButton(_ tab: LiveHostDockTab, vertical: Bool) -> some View {
-        let isSelected = selectedTab == tab
-        return Button {
+    private var shouldAnimateDockTabSwitch: Bool {
+        #if os(macOS) || os(iOS)
+        // Spring-animating heavy Solo / metronome panels while a locked groove plays
+        // stalls the main thread and audibly hiccups the drum clock.
+        !(viewModel.soloAccompanimentEnabled && viewModel.soloTempoLocked)
+        #else
+        true
+        #endif
+    }
+
+    private func selectDockTab(_ tab: LiveHostDockTab) {
+        guard selectedTab != tab else { return }
+        if shouldAnimateDockTabSwitch {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 selectedTab = tab
             }
+        } else {
+            selectedTab = tab
+        }
+    }
+
+    private func tabButton(_ tab: LiveHostDockTab, vertical: Bool) -> some View {
+        let isSelected = selectedTab == tab
+        return Button {
+            selectDockTab(tab)
         } label: {
             Group {
                 if vertical {
@@ -256,6 +275,7 @@ struct LiveHostControlRail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var quickTab: some View {
@@ -294,18 +314,23 @@ struct LiveHostControlRail: View {
                     icon: bandCuePadVisible ? "megaphone.fill" : "megaphone",
                     title: String(localized: "Band Cues")
                 ) {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    let showCues = {
                         bandCuePadVisible.toggle()
-                        if bandCuePadVisible { selectedTab = .cues }
+                        if bandCuePadVisible { selectDockTab(.cues) }
+                    }
+                    if shouldAnimateDockTabSwitch {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86), showCues)
+                    } else {
+                        showCues()
                     }
                 }
                 quickAction(icon: "metronome", title: String(localized: "Metronome")) {
-                    selectedTab = .metronome
+                    selectDockTab(.metronome)
                 }
                 #if os(macOS) || os(iOS)
                 if viewModel.soloAccompanimentAvailable {
                     quickAction(icon: "figure.wave", title: String(localized: "Solo Drums")) {
-                        selectedTab = .audio
+                        selectDockTab(.audio)
                     }
                 }
                 #endif
@@ -326,7 +351,7 @@ struct LiveHostControlRail: View {
             horizontalPadding: 0,
             showsCollapseButton: false
         )
-        .padding(.horizontal, -16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var audioTab: some View {
@@ -334,13 +359,16 @@ struct LiveHostControlRail: View {
             BackingTrackPanel(viewModel: viewModel, onImport: {
                 showBackingTrackImporter = true
             }, style: .compact)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             #if os(macOS) || os(iOS)
             if viewModel.soloAccompanimentAvailable {
                 SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             #endif
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

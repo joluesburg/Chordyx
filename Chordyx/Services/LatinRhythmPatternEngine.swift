@@ -96,8 +96,13 @@ enum LatinRhythmPatternEngine {
         }
 
         let eighthRatio = estimateEighthRatio(onsets: onsets, beatPeriod: beatPeriod)
+        let inferredBPM = beatPeriod > 0 ? 60.0 / beatPeriod : 0
         if eighthRatio >= 0.55 {
-            scores[.songo] = (scores[.songo] ?? 0) + eighthRatio * 0.18
+            scores[.songo] = (scores[.songo] ?? 0) + eighthRatio * 0.28
+            scores[.montuno] = (scores[.montuno] ?? 0) + eighthRatio * 0.12
+        }
+        if eighthRatio >= 0.62, inferredBPM >= 100, inferredBPM <= 140 {
+            scores[.songo] = (scores[.songo] ?? 0) + 0.18
         }
         if eighthRatio <= 0.28 {
             scores[.merengue] = (scores[.merengue] ?? 0) + (1.0 - eighthRatio) * 0.22

@@ -307,7 +307,7 @@ enum GlobalMusicGenreCatalog {
             g("pagode", "Pagode", region: .latinCaribbean, family: "Brazil", tempo: 92...128, peak: 108, groove: .bossaNova, GenreOpts(sync: 0.35...0.65, m7: 0.28)),
             g("forro", "Forró", region: .latinCaribbean, family: "Brazil", tempo: 108...140, peak: 124, groove: .countryTrain, GenreOpts(sync: 0.28...0.55, triad: 0.4)),
             g("mpb", "MPB", region: .latinCaribbean, family: "Brazil", tempo: 72...120, peak: 96, groove: .bossaNova, GenreOpts(sync: 0.22...0.52, m7: 0.25, maj7: 0.3)),
-            g("songo", "Songó", region: .latinCaribbean, family: "Caribbean", tempo: 82...138, peak: 102, groove: .songo, GenreOpts(sync: 0.38...0.72, m7: 0.3, ext: 0.28, latinTags: ["songo"])),
+            g("songo", "Songó", region: .latinCaribbean, family: "Caribbean", tempo: 96...148, peak: 118, groove: .songo, GenreOpts(sync: 0.38...0.72, m7: 0.3, ext: 0.28, latinTags: ["songo"])),
             g("tango", "Tango", region: .latinCaribbean, family: "Southern cone", tempo: 100...140, peak: 120, groove: .bolero, GenreOpts(sync: 0.35...0.65, m7: 0.25)),
             g("chacarera", "Chacarera", region: .latinCaribbean, family: "Southern cone", tempo: 108...140, peak: 124, groove: .countryTrain, GenreOpts(sync: 0.25...0.52, triad: 0.42)),
             g("bolero", "Bolero", region: .latinCaribbean, family: "Ballad", tempo: 56...88, peak: 72, groove: .bolero, GenreOpts(sync: 0...0.35, change: 0...8, maj7: 0.32, ext: 0.22, latinTags: ["bolero"])),

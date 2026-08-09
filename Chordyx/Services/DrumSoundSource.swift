@@ -29,13 +29,13 @@ enum DrumSoundSourceKind: String, CaseIterable, Identifiable, Codable, Sendable 
     var subtitle: String {
         switch self {
         case .systemGM:
-            String(localized: "Built-in General MIDI kit — no extra install.")
+            String(localized: "Built-in General MIDI kit (synth samples). For acoustic drums, load a soundfont or AU.")
         case .userSoundFont:
-            String(localized: "Load your own licensed drum soundfont.")
+            String(localized: "Load your own licensed drum soundfont (.sf2 / .dls) for more realistic kits.")
         case .audioUnit:
             String(localized: "Use a drum or sampler plugin installed on this Mac.")
         case .synthesis:
-            String(localized: "Fallback kit — use Apple GM for best quality.")
+            String(localized: "Thin fallback synth — prefer Apple GM, a soundfont, or an AU plugin.")
         }
     }
 }

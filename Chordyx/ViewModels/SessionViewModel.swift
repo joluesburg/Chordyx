@@ -33,6 +33,28 @@ final class SessionViewModel {
     var soloAutoStyleEnabled = true
     var soloDrumPattern: DrumPattern = .worshipBallad
     var soloDrumVolume: Float = 0.72
+    var soloDrumArrangeMode: DrumArrangeMode = .auto
+    var soloDrumLoopPack: DrumMIDILoopPack = .worship
+    var soloDrumHybridLayers = true
+    /// Kit / percussion family — remaps groove voices (batería, percusión, etc.).
+    var soloDrumInstrumentCategory: SoloDrumInstrumentCategory = SoloDrumInstrumentCategoryStore.load()
+    /// Alternate slot for instant A/B category audition without stopping the loop.
+    var soloDrumInstrumentCategoryB: SoloDrumInstrumentCategory = .lightPercussion
+    /// True after the host manually picks a category (blocks auto-suggest overwrite).
+    var soloInstrumentCategoryUserPicked = false
+    /// Suggested category from live genre (UI chip).
+    var soloSuggestedInstrumentCategory: SoloDrumInstrumentCategory?
+    /// When locked, small tempo drifts retimed live; large shifts still ask for OK.
+    var soloBeatFollowEnabled = SoloDrumBeatFollowStore.load()
+    /// EMA of live drift BPM for musical follow.
+    var soloBeatFollowEMA: Double?
+    /// Pending soft retime waiting for the next downbeat.
+    var soloPendingBeatFollowBPM: Double?
+    /// Bars of silent count-in before drums fade in on lock (0 = immediate).
+    var soloDrumCountInBars: Int = 1
+    var soloDrumEntranceTask: Task<Void, Never>?
+    var soloUserMIDILoops: [UserMIDIDrumLoop] = UserMIDIDrumLoopStore.load()
+    var activeUserMIDIDrumLoopID: UUID?
     var lastTrackedPianoNotes: [Int] = []
     var lastTrackedChordSymbol: String?
     var soloTempoLocked = false
@@ -45,8 +67,14 @@ final class SessionViewModel {
     static let soloTempoLockSampleCount = 5
     static let soloTempoLockMaxSpread = 6.0
     static let soloTempoProposalFallbackDelay: TimeInterval = 18
+    /// Minimum ΔBPM before Solo Drums offers a tempo-shift confirmation (beat-follow off).
     static let soloTempoDriftMinDelta = 6.0
+    /// Soft floor for live beat-follow nudges while locked.
+    static let soloTempoFollowSoftDelta = 2.0
+    /// Large drifts always ask for confirmation even with beat-follow on.
+    static let soloTempoFollowHardDelta = 8.0
     static let soloTempoDriftSampleCount = 4
+    static let soloBeatFollowEMAAlpha = 0.28
     /// True after Solo Drums auto-armed a synced metronome for this lock cycle.
     var soloDrumsMetronomeArmed = false
     var lastHostLiveGroovePayloadSync: TimeInterval = 0
@@ -108,11 +136,24 @@ final class SessionViewModel {
     private var keyReviewTask: Task<Void, Never>?
     private var lastPeriodicKeyReviewAt: TimeInterval = 0
     private var lastAutoKeyConfidence: Double = 0
+    /// Confidence of the key currently locked via Auto-detect (for flip hysteresis).
+    private var lockedAutoKeyConfidence: Double = 0
     private var lastAudioKeyDetectAttemptAt: TimeInterval = 0
+    /// Chronological chord plays (with repeats) for Auto-key — not the unique MRU ring order.
+    private var liveKeyChordHistory: [String] = []
+    private static let liveKeyChordHistoryLimit = 32
+    /// Wall-clock when Auto-key was armed for this session (cooldown before first announce).
+    private var autoKeyArmedAt: TimeInterval = 0
+    private static let autoKeyAnnounceCooldownSeconds: TimeInterval = 2.5
     /// Adaptive re-score while Auto key is on (tightens when uncertain).
-    private static let keyReviewIntervalFastSeconds: TimeInterval = 6
+    private static let keyReviewIntervalFastSeconds: TimeInterval = 5
     private static let keyReviewIntervalNormalSeconds: TimeInterval = 10
-    private static let keyReviewIntervalStableSeconds: TimeInterval = 15
+    private static let keyReviewIntervalStableSeconds: TimeInterval = 16
+    /// Minimum confidence before treating a candidate as a committed Auto key.
+    /// Kept above soft "no progression yet" caps so we never announce from scale-degree noise.
+    private static let autoKeyCommitConfidence: Double = 0.48
+    /// Challenger must clear the locked key by this margin (unless trusted source / absolute floor).
+    private static let autoKeyFlipMargin: Double = 0.14
     private let progressionInference = ProgressionInferenceEngine()
     /// True after a repeating live loop was auto-applied to `payload.chords`.
     var hasInferredLiveProgression: Bool {
@@ -349,6 +390,23 @@ final class SessionViewModel {
             return GuestDisplaySettings.effectiveNotation(hostNotation: payload.notation, isGuest: true)
         }
         return payload.notation
+    }
+
+    /// Session key glyph for UI — never shows a tonic letter while Auto is still listening.
+    func autoKeyDisplayGlyph(isGuest: Bool) -> String? {
+        guard payload.autoDetectKey else {
+            return displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+        }
+        guard payload.isKeyAutoDetected else { return nil }
+        return displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+    }
+
+    /// True when `liveChordSymbol` is a bare letter/power dyad (note), not a triad/seventh.
+    static func isBareNoteLiveSymbol(_ symbol: String?) -> Bool {
+        guard let symbol, !symbol.isEmpty else { return false }
+        guard let parsed = Transposer.parse(symbol) else { return true }
+        let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        return suffix.isEmpty || suffix == "5"
     }
 
     func effectiveDisplayMode(isGuest: Bool) -> SessionDisplayMode {
@@ -812,20 +870,25 @@ final class SessionViewModel {
     private func schedulePianoSideEffects(notes: [Int]) {
         pianoSideEffectsTask?.cancel()
         pianoSideEffectsTask = Task { @MainActor [weak self] in
-            await Task.yield()
+            // Wait for MIDI/piano chord tones to settle — avoid registering melody single notes.
+            let pitchClasses = Set(notes.map { PianoNote.pitchClass(forStored: $0) })
+            let settleMs: UInt64 = pitchClasses.count < 3 ? 70 : 25
+            try? await Task.sleep(for: .milliseconds(settleMs))
             guard let self, !Task.isCancelled, self.isInSession else { return }
-            guard self.payload.pianoNotes == notes else { return }
-
-            if !notes.isEmpty, let symbol = self.payload.liveChordSymbol {
-                self.applyFreestyleSideEffects(for: symbol)
-                // Always run key AI from host piano/MIDI when Auto is on — any host, any session kind.
-                if self.payload.autoDetectKey {
-                    self.maybeAutoDetectKey()
-                }
-                self.updatePianoChartMismatch()
+            let currentNotes = self.payload.pianoNotes
+            guard !currentNotes.isEmpty else { return }
+            // Re-read after settle so a forming triad isn't treated as a single pitch.
+            self.updateLiveChordSymbol(from: currentNotes)
+            guard let symbol = self.payload.liveChordSymbol else { return }
+            let pcs = Set(currentNotes.map { PianoNote.pitchClass(forStored: $0) })
+            let isChord = KeyChordAnalysis.isChordVoicing(pitchClassCount: pcs.count, symbol: symbol)
+            self.applyFreestyleSideEffects(for: symbol, contributesToKeyAndProgression: isChord)
+            if self.payload.autoDetectKey, isChord {
+                self.maybeAutoDetectKey()
             }
+            self.updatePianoChartMismatch()
             #if os(macOS) || os(iOS)
-            self.trackLivePerformanceFromPiano(activeNotes: notes)
+            self.trackLivePerformanceFromPiano(activeNotes: currentNotes)
             #endif
         }
     }
@@ -875,7 +938,8 @@ final class SessionViewModel {
         payload.liveChordSymbol = symbol
     }
 
-    private func applyFreestyleSideEffects(for symbol: String) {
+    private func applyFreestyleSideEffects(for symbol: String, contributesToKeyAndProgression: Bool = true) {
+        guard contributesToKeyAndProgression else { return }
         let registeredRingPlay: Bool
         if hasInferredLiveProgression {
             registeredRingPlay = registerLiveRingChordPlay(symbol: symbol)
@@ -889,8 +953,13 @@ final class SessionViewModel {
             registeredRingPlay = false
         }
         if registeredRingPlay || usesLiveFreestyleRing {
+            appendLiveKeyChordHistory(symbol)
             maybeAutoDetectKey()
             maybeInferLiveProgression(symbol: symbol)
+        } else if payload.autoDetectKey {
+            // Host piano outside freestyle ring still feeds chronological key evidence.
+            appendLiveKeyChordHistory(symbol)
+            maybeAutoDetectKey()
         }
     }
 
@@ -913,7 +982,9 @@ final class SessionViewModel {
         guard !indices.isEmpty else { return }
         updateLiveChordSymbol(from: indices)
         guard let symbol = payload.liveChordSymbol else { return }
-        applyFreestyleSideEffects(for: symbol)
+        let pcs = Set(indices.map { PianoNote.pitchClass(forStored: $0) })
+        let isChord = KeyChordAnalysis.isChordVoicing(pitchClassCount: pcs.count, symbol: symbol)
+        applyFreestyleSideEffects(for: symbol, contributesToKeyAndProgression: isChord)
         updatePianoChartMismatch()
     }
 
@@ -1014,6 +1085,20 @@ final class SessionViewModel {
         payload.liveRingUsageCounts = [:]
         payload.liveRingRecentOrder = []
         payload.liveRingCanonicalSymbols = [:]
+        liveKeyChordHistory = []
+    }
+
+    private func appendLiveKeyChordHistory(_ symbol: String) {
+        let normalized = LiveRing.normalize(symbol)
+        guard !normalized.isEmpty else { return }
+        // Bare letters / power dyads are melody noise — never feed Auto-key.
+        if SessionViewModel.isBareNoteLiveSymbol(normalized) { return }
+        // Avoid flooding history when the same triad is held/retriggered continuously.
+        if liveKeyChordHistory.last == normalized { return }
+        liveKeyChordHistory.append(normalized)
+        if liveKeyChordHistory.count > Self.liveKeyChordHistoryLimit {
+            liveKeyChordHistory = Array(liveKeyChordHistory.suffix(Self.liveKeyChordHistoryLimit))
+        }
     }
 
     /// Archives the current ring and clears usage stats — use when starting a new song.
@@ -1029,18 +1114,28 @@ final class SessionViewModel {
         }
         pendingDetectedKey = nil
         pendingDetectedKeyHits = 0
+        lockedAutoKeyConfidence = 0
+        lastAutoKeyConfidence = 0
+        liveKeyChordHistory = []
+        if payload.autoDetectKey {
+            autoKeyArmedAt = Date().timeIntervalSince1970
+            payload.isKeyAutoDetected = false
+        }
         syncLiveImmediate()
     }
 
     private func liveRingSymbolsForKeyDetection() -> [String] {
-        var symbols = payload.liveRingRecentOrder.map { payload.liveRingCanonicalSymbols[$0] ?? $0 }
+        // Prefer chronological progression (with repeats) so cadences / templates work.
+        var symbols = liveKeyChordHistory
+        if symbols.isEmpty {
+            symbols = payload.liveRingRecentOrder.map { payload.liveRingCanonicalSymbols[$0] ?? $0 }
+        }
         if symbols.isEmpty {
             symbols = payload.freestyleChordSymbols
         }
-        if let live = payload.liveChordSymbol, !LiveRing.contains(live, in: symbols) {
-            symbols.append(live)
-        }
-        // Prefer a longer recent window so HMM / templates see phrase context.
+        // Strip bare letters / power dyads that may still sit in freestyle ring state.
+        symbols = symbols.filter { !Self.isBareNoteLiveSymbol($0) }
+        // Do not append bare live single-note letters — they poison Auto-key (Dm melody → "E"/Mi).
         if symbols.count > 24 {
             symbols = Array(symbols.suffix(24))
         }
@@ -1095,10 +1190,11 @@ final class SessionViewModel {
             confidence: livePerformanceFusion.audioKeyConfidence,
             scores: livePerformanceFusion.audioKeyScores
         )
-        // Soft re-check when audio locks a key before enough chords land (throttled).
-        guard livePerformanceFusion.audioKeyConfidence >= 0.42 else { return }
+        // Soft re-check only when audio is clearly assertive AND we already have chord progression evidence.
+        guard livePerformanceFusion.audioKeyConfidence >= 0.62 else { return }
+        guard KeyChordAnalysis.hasProgressionEvidence(liveRingSymbolsForKeyDetection()) else { return }
         let now = Date().timeIntervalSince1970
-        guard now - lastAudioKeyDetectAttemptAt >= 2.5 else { return }
+        guard now - lastAudioKeyDetectAttemptAt >= 3.0 else { return }
         lastAudioKeyDetectAttemptAt = now
         maybeAutoDetectKey()
         #endif
@@ -1108,64 +1204,158 @@ final class SessionViewModel {
         guard payload.autoDetectKey, canDriveSession else { return }
 
         let symbols = liveRingSymbolsForKeyDetection()
-        guard let result = AdaptiveKeyLearningEngine.shared.detect(
-            from: symbols,
-            sessionName: payload.sessionName
+        guard let decision = Self.evaluateAutoKeyCommit(
+            symbols: symbols,
+            currentKey: payload.key,
+            isKeyAutoDetected: payload.isKeyAutoDetected,
+            lockedConfidence: lockedAutoKeyConfidence,
+            pendingKey: pendingDetectedKey,
+            pendingHits: pendingDetectedKeyHits,
+            forcePeriodicReview: forcePeriodicReview,
+            sessionName: payload.sessionName,
+            armedAt: autoKeyArmedAt,
+            now: Date().timeIntervalSince1970,
+            detect: { AdaptiveKeyLearningEngine.shared.detect(from: $0, sessionName: $1) }
         ) else { return }
 
-        lastAutoKeyConfidence = result.confidence
+        lastAutoKeyConfidence = decision.confidence
 
-        if result.key == payload.key {
+        switch decision.action {
+        case .reinforceSameKey:
             pendingDetectedKey = nil
             pendingDetectedKeyHits = 0
             payload.isKeyAutoDetected = true
             symbolsAtLastAutoKeyDetection = symbols
             keyUsedForAutoDetection = payload.key
-            return
+            lockedAutoKeyConfidence = max(lockedAutoKeyConfidence, decision.confidence)
+
+        case .accumulatePending(let key, let hits):
+            pendingDetectedKey = key
+            pendingDetectedKeyHits = hits
+
+        case .commit(let key, let source):
+            applyAutoDetectedKeyChange(
+                to: key,
+                from: symbols,
+                confidence: decision.confidence,
+                source: source,
+                preserveLiveRing: forcePeriodicReview && payload.isKeyAutoDetected
+            )
+        }
+    }
+
+    /// Pure Auto-key commit policy used by the live Session path (and integration tests).
+    enum AutoKeyCommitAction: Equatable {
+        case reinforceSameKey
+        case accumulatePending(key: MusicalKey, hits: Int)
+        case commit(key: MusicalKey, source: AdaptiveKeyDetection.Source)
+    }
+
+    struct AutoKeyCommitDecision: Equatable {
+        let action: AutoKeyCommitAction
+        let confidence: Double
+    }
+
+    /// Same gates `maybeAutoDetectKey` uses — call this from tests with live-style symbol streams.
+    static func evaluateAutoKeyCommit(
+        symbols: [String],
+        currentKey: MusicalKey,
+        isKeyAutoDetected: Bool,
+        lockedConfidence: Double,
+        pendingKey: MusicalKey?,
+        pendingHits: Int,
+        forcePeriodicReview: Bool,
+        sessionName: String?,
+        armedAt: TimeInterval,
+        now: TimeInterval,
+        detect: (([String], String?) -> AdaptiveKeyDetection?)? = nil
+    ) -> AutoKeyCommitDecision? {
+        guard KeyChordAnalysis.hasProgressionEvidence(symbols) else { return nil }
+        // Cooldown after session start — avoid stale memory / early noise locking a letter.
+        if !isKeyAutoDetected, armedAt > 0, now - armedAt < autoKeyAnnounceCooldownSeconds {
+            return nil
         }
 
-        // Periodic reviews require stronger evidence before changing an already-locked Auto key.
-        if forcePeriodicReview, payload.isKeyAutoDetected {
+        let detector = detect ?? { _, _ in nil }
+        guard let result = detector(symbols, sessionName) else { return nil }
+        guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) else {
+            return nil
+        }
+
+        if result.key == currentKey {
+            if result.confidence >= autoKeyCommitConfidence {
+                return AutoKeyCommitDecision(action: .reinforceSameKey, confidence: result.confidence)
+            }
+            return nil
+        }
+
+        let trustedSource = result.source == .library
+            || (result.source == .ensemble && result.confidence >= 0.58)
+            || (result.source == .memory && result.confidence >= 0.85
+                && !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key))
+
+        let minCommit = isKeyAutoDetected
+            ? (result.source == .audio ? 0.62 : 0.50)
+            : autoKeyCommitConfidence
+        guard result.confidence >= minCommit || trustedSource else { return nil }
+
+        if forcePeriodicReview, isKeyAutoDetected {
             let strongEnough = result.source == .library
-                || result.source == .memory
-                || (result.source == .audio && result.confidence >= 0.5)
-                || result.confidence >= 0.55
-            guard strongEnough else { return }
+                || (result.source == .memory && result.confidence >= 0.85)
+                || result.confidence >= 0.62
+            guard strongEnough else { return nil }
         }
 
-        if result.key == pendingDetectedKey {
-            pendingDetectedKeyHits += 1
-        } else {
-            pendingDetectedKey = result.key
-            pendingDetectedKeyHits = 1
+        if isKeyAutoDetected {
+            let flipMargin = result.source == .audio
+                ? autoKeyFlipMargin + 0.08
+                : autoKeyFlipMargin
+            let beatsLocked = result.confidence >= lockedConfidence + flipMargin
+            let absoluteFloor = trustedSource ? 0.62 : 0.68
+            guard beatsLocked || result.confidence >= absoluteFloor else { return nil }
         }
 
-        let isInitialGuess = payload.liveRingRecentOrder.count <= 4 && !payload.isKeyAutoDetected
-        let trustedSource = result.source == .memory
-            || result.source == .library
-            || (result.source == .audio && result.confidence >= 0.45)
+        var nextHits = 1
+        var nextPending = result.key
+        if result.key == pendingKey {
+            nextHits = pendingHits + 1
+            nextPending = result.key
+        }
+
+        let isInitialGuess = !isKeyAutoDetected
+        // Memory never gets a 1-hit lock — teach-back of bad E must not win immediately.
+        let assertiveLock = (result.confidence >= 0.68 && trustedSource && result.source != .memory)
+            || (result.source == .library && result.confidence >= 0.72)
         let requiredHits: Int
-        if trustedSource {
-            requiredHits = forcePeriodicReview && payload.isKeyAutoDetected ? 2 : 1
-        } else if isInitialGuess {
-            requiredHits = 1
-        } else if result.confidence >= 0.5 {
-            requiredHits = forcePeriodicReview ? 2 : 2
+        if assertiveLock {
+            requiredHits = (forcePeriodicReview && isKeyAutoDetected) ? 2 : 1
+        } else if result.source == .memory {
+            requiredHits = 3
+        } else if isInitialGuess, result.confidence >= 0.50 {
+            requiredHits = 2
+        } else if result.confidence >= 0.55 {
+            requiredHits = 2
         } else {
-            requiredHits = forcePeriodicReview ? 3 : 3
+            requiredHits = 3
         }
-        guard pendingDetectedKeyHits >= requiredHits else { return }
 
-        applyAutoDetectedKeyChange(
-            to: result.key,
-            from: symbols,
-            preserveLiveRing: forcePeriodicReview && payload.isKeyAutoDetected
+        if nextHits < requiredHits {
+            return AutoKeyCommitDecision(
+                action: .accumulatePending(key: nextPending, hits: nextHits),
+                confidence: result.confidence
+            )
+        }
+        return AutoKeyCommitDecision(
+            action: .commit(key: result.key, source: result.source),
+            confidence: result.confidence
         )
     }
 
     private func applyAutoDetectedKeyChange(
         to newKey: MusicalKey,
         from symbols: [String],
+        confidence: Double,
+        source: AdaptiveKeyDetection.Source,
         preserveLiveRing: Bool = false
     ) {
         let keyChanged = newKey.pitchClass != payload.key.pitchClass
@@ -1188,11 +1378,18 @@ final class SessionViewModel {
         pendingDetectedKeyHits = 0
         symbolsAtLastAutoKeyDetection = symbols
         keyUsedForAutoDetection = newKey
-        AdaptiveKeyLearningEngine.shared.confirmDetection(
-            symbols: symbols,
-            key: newKey,
-            sessionName: payload.sessionName
-        )
+        lockedAutoKeyConfidence = confidence
+        lastAutoKeyConfidence = confidence
+        // Only reinforce memory when evidence is solid — avoid teaching wrong early locks.
+        if confidence >= 0.58
+            || source == .memory
+            || source == .library {
+            AdaptiveKeyLearningEngine.shared.confirmDetection(
+                symbols: symbols,
+                key: newKey,
+                sessionName: payload.sessionName
+            )
+        }
         sync()
     }
 
@@ -1513,6 +1710,12 @@ final class SessionViewModel {
         isLiveProgressionSession = true
         role = .host
         isInSession = true
+        autoKeyArmedAt = autoDetectKey ? Date().timeIntervalSince1970 : 0
+        pendingDetectedKey = nil
+        pendingDetectedKeyHits = 0
+        lockedAutoKeyConfidence = 0
+        lastAutoKeyConfidence = 0
+        liveKeyChordHistory = []
         metronome.stop()
         hostActivationPending = true
         pushWatchUpdate()
@@ -1547,6 +1750,12 @@ final class SessionViewModel {
         isLiveProgressionSession = false
         role = .host
         isInSession = true
+        autoKeyArmedAt = autoDetectKey ? Date().timeIntervalSince1970 : 0
+        pendingDetectedKey = nil
+        pendingDetectedKeyHits = 0
+        lockedAutoKeyConfidence = 0
+        lastAutoKeyConfidence = 0
+        liveKeyChordHistory = []
         metronome.stop()
         hostActivationPending = true
         pushWatchUpdate()
@@ -2154,6 +2363,7 @@ final class SessionViewModel {
         guard canDriveSession else { return }
         payload.autoDetectKey = enabled
         if enabled {
+            autoKeyArmedAt = Date().timeIntervalSince1970
             maybeAutoDetectKey()
             startPeriodicKeyReviewIfNeeded()
             refreshAudioKeyAssistPolicy()
@@ -2161,6 +2371,9 @@ final class SessionViewModel {
             payload.isKeyAutoDetected = false
             pendingDetectedKey = nil
             pendingDetectedKeyHits = 0
+            lockedAutoKeyConfidence = 0
+            lastAutoKeyConfidence = 0
+            autoKeyArmedAt = 0
             stopPeriodicKeyReview()
             #if os(macOS) || os(iOS)
             livePerformanceFusion.setAudioKeyAssistEnabled(false)
@@ -2484,6 +2697,9 @@ final class SessionViewModel {
         payload.isKeyAutoDetected = false
         symbolsAtLastAutoKeyDetection = []
         keyUsedForAutoDetection = nil
+        lockedAutoKeyConfidence = 0
+        lastAutoKeyConfidence = 0
+        liveKeyChordHistory = []
 
         if isLiveProgressionSession {
             beginNewLiveRingSegment()
@@ -2854,16 +3070,27 @@ final class SessionViewModel {
 
     func applyMetronome() {
         #if os(iOS)
-        let bpm = displayedSessionTempoBPM
+        var bpm = displayedSessionTempoBPM
         let isPlaying = displayedMetronomePlaying
         #else
-        let bpm = payload.tempoBPM
+        var bpm = payload.tempoBPM
         let isPlaying = payload.isMetronomePlaying
+        #endif
+        var beatsPerBar = max(1, payload.beatsPerBar)
+        var beatUnit = max(1, payload.beatUnit)
+        #if os(macOS) || os(iOS)
+        // When Solo Drums owns the grid, click must share quarter-note BPM + bar accents
+        // with the 16-step drum patterns (4 quarters), or accents drift vs the kick.
+        if soloAccompanimentEnabled, soloTempoLocked, soloDrumsMetronomeArmed || isSoloDrumGroovePlaying {
+            if let locked = soloLockedBPM { bpm = locked }
+            beatUnit = 4
+            beatsPerBar = 4
+        }
         #endif
         metronome.apply(
             bpm: bpm,
-            beatsPerBar: payload.beatsPerBar,
-            beatUnit: payload.beatUnit,
+            beatsPerBar: beatsPerBar,
+            beatUnit: beatUnit,
             isPlaying: isPlaying,
             startEpoch: payload.metronomeStartEpoch ?? Date().timeIntervalSince1970,
             clockOffset: role == .guest ? sessionManager.clockOffset : 0,
@@ -3021,12 +3248,6 @@ final class SessionViewModel {
         refreshMetronomeAudioPolicy()
         setScreenAlwaysOn(true)
         metronome.setSessionKeepAlive(false)
-        #if os(iOS)
-        // iPhone remains guest-only for Solo host; iPad may host Solo Drums.
-        if PlatformDevice.isPhone, soloAccompanimentEnabled {
-            setSoloAccompanimentEnabled(false)
-        }
-        #endif
         refreshSessionAudioPolicy()
         // Live Activity can stall the main thread if requested mid-transition.
         Task { @MainActor [weak self] in
@@ -3507,6 +3728,9 @@ extension SessionViewModel {
     }
 
     func handleExtendedFeatureSectionChange(to section: SectionMarker?) {
+        #if os(macOS) || os(iOS)
+        refreshSoloDrumSectionDynamics()
+        #endif
         guard canDriveSession, let section else { return }
         if lastTrackedSectionID != section.id {
             lastTrackedSectionID = section.id

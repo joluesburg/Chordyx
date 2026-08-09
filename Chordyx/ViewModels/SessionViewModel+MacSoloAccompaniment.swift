@@ -15,14 +15,7 @@ private enum HostLiveGrooveSyncCache {
 extension SessionViewModel {
     var soloAccompanimentAvailable: Bool {
         guard canDriveSession, isInSession else { return false }
-        #if os(macOS)
-        return true
-        #elseif os(iOS)
-        // iPad can host Solo Drums; iPhone stays a guest display for tempo/genre.
         return PlatformDevice.canHostSoloAccompaniment
-        #else
-        return false
-        #endif
     }
 
     var soloDrumsWaitingForTempo: Bool {
@@ -101,7 +94,14 @@ extension SessionViewModel {
             return livePerformanceFusion.globalGenreAnalysis.displaySubtitle
         }
         if detectedLiveStyle != .unknown {
-            return detectedLiveStyle.category == .latin ? String(localized: "Accompaniment groove") : String(localized: "Groove family")
+            switch detectedLiveStyle.category {
+            case .latin: return String(localized: "Latin / Caribbean groove")
+            case .urban: return String(localized: "Urban groove")
+            case .world: return String(localized: "World groove")
+            case .worship: return String(localized: "Worship groove")
+            case .jazzBlues: return String(localized: "Jazz / blues groove")
+            case .popRock: return String(localized: "Groove family")
+            }
         }
         return ""
     }
@@ -215,27 +215,33 @@ extension SessionViewModel {
             soloPlayingSince = Date().timeIntervalSince1970
         }
 
-        let notesChanged = activeNotes != lastTrackedPianoNotes
+        // Only count newly struck pitches as rhythm onsets — note-offs were
+        // poisoning tempo toward half-time / irregular gaps.
+        let notesAdded = activeNotes.contains { !lastTrackedPianoNotes.contains($0) }
         let chordChanged = payload.liveChordSymbol != lastTrackedChordSymbol
         if soloTempoLocked {
             let now = Date().timeIntervalSince1970
-            if chordChanged || (now - lastStyleLearnTime >= Self.soloStyleLearnThrottle) {
-                lastStyleLearnTime = now
+            // Keep feeding note onsets into the drift analyzer so half-time locks can recover.
+            if notesAdded || chordChanged || (now - lastStyleLearnTime >= Self.soloStyleLearnThrottle) {
+                if chordChanged || notesAdded {
+                    lastStyleLearnTime = now
+                }
                 livePerformanceFusion.registerMIDIPerformance(
                     chordSymbol: payload.liveChordSymbol,
                     activeNoteCount: activeNotes.count,
-                    newNotesAdded: chordChanged
+                    newNotesAdded: notesAdded || chordChanged
                 )
             }
-            if chordChanged {
+            if soloPendingBeatFollowBPM != nil || chordChanged || notesAdded {
                 evaluateSoloTempoDriftWhilePlaying()
             }
         } else if soloAccompanimentEnabled {
             livePerformanceFusion.registerMIDIPerformance(
                 chordSymbol: payload.liveChordSymbol,
                 activeNoteCount: activeNotes.count,
-                newNotesAdded: notesChanged
+                newNotesAdded: notesAdded
             )
+            refreshSuggestedSoloInstrumentCategory()
         }
         lastTrackedPianoNotes = activeNotes
         lastTrackedChordSymbol = payload.liveChordSymbol
@@ -266,7 +272,7 @@ extension SessionViewModel {
         livePerformanceFusion.audioAIEnabled = soloAudioAIEnabled
         if enabled {
             #if os(iOS)
-            // Defer engine / session work so the toggle animation and layout finish first.
+            // Defer engine / session work so the toggle animation, Live Activity, and layout finish first.
             Task { @MainActor [weak self] in
                 await Task.yield()
                 try? await Task.sleep(for: .milliseconds(80))
@@ -326,6 +332,52 @@ extension SessionViewModel {
         }
     }
 
+    func setSoloDrumInstrumentCategory(_ category: SoloDrumInstrumentCategory, userPicked: Bool = true) {
+        if userPicked {
+            soloInstrumentCategoryUserPicked = true
+            if soloSuggestedInstrumentCategory == category {
+                soloSuggestedInstrumentCategory = nil
+            }
+        }
+        guard category != soloDrumInstrumentCategory else {
+            drumAccompaniment.setInstrumentCategory(category)
+            return
+        }
+        soloDrumInstrumentCategory = category
+        drumAccompaniment.setInstrumentCategory(category)
+        syncHostLiveGrooveToPayload(force: true)
+    }
+
+    /// Instant A/B audition between two instrument families without stopping the loop.
+    func swapSoloDrumInstrumentCategoryAB() {
+        let previous = soloDrumInstrumentCategory
+        setSoloDrumInstrumentCategory(soloDrumInstrumentCategoryB, userPicked: true)
+        soloDrumInstrumentCategoryB = previous
+    }
+
+    func applySuggestedSoloInstrumentCategory() {
+        guard let suggested = soloSuggestedInstrumentCategory else { return }
+        setSoloDrumInstrumentCategory(suggested, userPicked: true)
+        soloSuggestedInstrumentCategory = nil
+    }
+
+    func setSoloBeatFollowEnabled(_ enabled: Bool) {
+        soloBeatFollowEnabled = enabled
+        SoloDrumBeatFollowStore.save(enabled)
+        if enabled {
+            soloTempoDriftSamples.removeAll()
+            soloBeatFollowEMA = soloLockedBPM
+            soloPendingBeatFollowBPM = nil
+        } else {
+            soloPendingBeatFollowBPM = nil
+            soloBeatFollowEMA = nil
+        }
+    }
+
+    func setSoloDrumCountInBars(_ bars: Int) {
+        soloDrumCountInBars = min(2, max(0, bars))
+    }
+
     func applySuggestedDrumPattern() {
         guard let pattern = suggestedDrumPattern else { return }
         setSoloDrumPattern(pattern)
@@ -334,11 +386,14 @@ extension SessionViewModel {
     func setSoloDrumPattern(_ pattern: DrumPattern) {
         let changed = pattern != soloDrumPattern
         soloDrumPattern = pattern
+        soloDrumLoopPack = DrumMIDILoopPack.pack(for: pattern)
+        drumAccompaniment.setLoopPack(soloDrumLoopPack)
         guard changed, soloAccompanimentEnabled, soloTempoLocked else { return }
         // Keep the frozen groove clock — swap feel on the same grid so metronome stays locked.
         activeLearnedDrumPattern = nil
         drumAccompaniment.setLearnedPattern(nil, force: true)
         drumAccompaniment.setPattern(pattern, force: true)
+        applySoloDrumLoopSettingsToEngine()
         if payload.isMetronomePlaying {
             alignMetronomeEpochToSoloGroove()
             applyMetronome()
@@ -350,6 +405,73 @@ extension SessionViewModel {
         soloDrumVolume = volume
         // Apply even during preview / pre-lock so the slider always matches what you hear.
         drumAccompaniment.volume = volume
+    }
+
+    func setSoloDrumArrangeMode(_ mode: DrumArrangeMode) {
+        soloDrumArrangeMode = mode
+        drumAccompaniment.setArrangeMode(mode)
+    }
+
+    func setSoloDrumLoopPack(_ pack: DrumMIDILoopPack) {
+        soloDrumLoopPack = pack
+        drumAccompaniment.setLoopPack(pack)
+    }
+
+    func setSoloDrumHybridLayers(_ enabled: Bool) {
+        soloDrumHybridLayers = enabled
+        drumAccompaniment.setHybridMIDILayers(enabled)
+    }
+
+    var soloCurrentPhraseLabel: String {
+        drumAccompaniment.currentPhraseKind.shortLabel
+    }
+
+    func refreshSoloUserMIDILoops() {
+        soloUserMIDILoops = UserMIDIDrumLoopStore.load()
+    }
+
+    /// Capture the current arranged MIDI feel as a reusable tempo-native loop.
+    func saveCurrentSoloMIDILoop(named name: String, bars: Int = 4) {
+        let loop = drumAccompaniment.captureUserMIDILoop(
+            displayName: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? String(localized: "My drum loop")
+                : name,
+            bars: bars
+        )
+        UserMIDIDrumLoopStore.upsert(loop)
+        refreshSoloUserMIDILoops()
+        selectUserMIDIDrumLoop(loop.id)
+    }
+
+    func selectUserMIDIDrumLoop(_ id: UUID?) {
+        activeUserMIDIDrumLoopID = id
+        if let id, let loop = soloUserMIDILoops.first(where: { $0.id == id }) {
+            drumAccompaniment.setUserMIDILoop(loop)
+        } else {
+            drumAccompaniment.setUserMIDILoop(nil)
+        }
+    }
+
+    func deleteUserMIDIDrumLoop(_ id: UUID) {
+        UserMIDIDrumLoopStore.delete(id)
+        if activeUserMIDIDrumLoopID == id {
+            activeUserMIDIDrumLoopID = nil
+            drumAccompaniment.setUserMIDILoop(nil)
+        }
+        refreshSoloUserMIDILoops()
+    }
+
+    func applySoloDrumLoopSettingsToEngine() {
+        drumAccompaniment.setArrangeMode(soloDrumArrangeMode)
+        drumAccompaniment.setLoopPack(soloDrumLoopPack)
+        drumAccompaniment.setHybridMIDILayers(soloDrumHybridLayers)
+        drumAccompaniment.setInstrumentCategory(soloDrumInstrumentCategory)
+        if let id = activeUserMIDIDrumLoopID,
+           let loop = soloUserMIDILoops.first(where: { $0.id == id }) {
+            drumAccompaniment.setUserMIDILoop(loop)
+        } else {
+            drumAccompaniment.setUserMIDILoop(nil)
+        }
     }
 
     func relearnSoloTempo() {
@@ -373,8 +495,8 @@ extension SessionViewModel {
         guard let proposal = soloPendingProposal else { return }
         soloDrumPattern = proposal.pattern
         soloPendingProposal = nil
-        // "Yes, start drums" must actually include drums — upgrade bass-only / off.
         if !autoBandMode.includesDrums {
+            // "Yes, start drums" must actually include drums — upgrade bass-only / off.
             autoBandMode = autoBandMode.includesBass ? .fullBand : .drumsOnly
         }
         lockSoloDrums(at: proposal.bpm, pattern: proposal.pattern)
@@ -396,14 +518,19 @@ extension SessionViewModel {
         guard let bpm = soloProposedTempoShiftBPM else { return }
         soloProposedTempoShiftBPM = nil
         soloTempoDriftSamples.removeAll()
+        soloPendingBeatFollowBPM = nil
+        soloBeatFollowEMA = bpm
         soloDrumPhase = .playing
         soloLockedBPM = bpm
         payload.tempoBPM = bpm
         livePerformanceFusion.resetDriftAnalysis()
         drumAccompaniment.retimeLockedGroove(to: bpm)
         if soloBassEnabled, autoBandMode.includesBass {
-            bassAccompaniment.stop(force: true)
-            startBassAccompanimentIfNeeded(at: bpm)
+            if bassAccompaniment.isPlaying {
+                bassAccompaniment.retimeLockedGroove(to: bpm)
+            } else {
+                startBassAccompanimentIfNeeded(at: bpm)
+            }
         }
         if payload.isMetronomePlaying {
             alignMetronomeEpochToSoloGroove()
@@ -443,33 +570,31 @@ extension SessionViewModel {
     func applySoloDrumsMetronomePolicy() {
         let drumsPlaying = soloAccompanimentEnabled && soloTempoLocked && isSoloDrumGroovePlaying
         if drumsPlaying {
-            armSyncedMetronomeWithSoloDrumsIfNeeded()
+            // Never auto-start the click with Solo Drums — only phase-lock if the user
+            // already turned the metronome on (or turns it on later via toggleMetronome).
+            if payload.isMetronomePlaying {
+                soloDrumsMetronomeArmed = true
+                alignMetronomeEpochToSoloGroove()
+                applyMetronome()
+            } else {
+                soloDrumsMetronomeArmed = false
+            }
+            refreshMetronomeAudioPolicy()
         } else {
             soloDrumsMetronomeArmed = false
             refreshMetronomeAudioPolicy()
         }
     }
 
-    /// Starts (once per lock) a living metronome phase-locked to the Solo drum grid.
-    func armSyncedMetronomeWithSoloDrumsIfNeeded() {
-        guard canDriveSession else { return }
-        if soloDrumsMetronomeArmed {
-            if payload.isMetronomePlaying {
-                alignMetronomeEpochToSoloGroove()
-                applyMetronome()
-            }
-            return
-        }
-        soloDrumsMetronomeArmed = true
-        startSyncedMetronomeWithSoloDrums()
-    }
-
-    /// User / Solo path: turn metronome on and lock its bar phase to the drum groove.
+    /// User path: turn metronome on and lock its bar phase to the drum groove.
     func startSyncedMetronomeWithSoloDrums() {
         guard canDriveSession else { return }
         if let locked = soloLockedBPM {
             payload.tempoBPM = locked
         }
+        // Solo Drums patterns are authored on a quarter-note / 16th grid.
+        payload.beatUnit = 4
+        soloDrumsMetronomeArmed = true
         alignMetronomeEpochToSoloGroove()
         payload.isMetronomePlaying = true
         payload.isCountingIn = false
@@ -481,8 +606,13 @@ extension SessionViewModel {
 
     /// Maps drum groove wall-clock anchor → metronome start epoch (shared beat grid).
     func alignMetronomeEpochToSoloGroove() {
-        if let grooveCF = drumAccompaniment.grooveAnchor {
-            payload.metronomeStartEpoch = grooveCF + kCFAbsoluteTimeIntervalSince1970
+        if let locked = soloLockedBPM {
+            payload.tempoBPM = locked
+        }
+        // Drum groove always advances in quarter-note BPM; force click math to match.
+        payload.beatUnit = 4
+        if let epoch = drumAccompaniment.grooveStartUnixEpoch {
+            payload.metronomeStartEpoch = epoch
         } else {
             payload.metronomeStartEpoch = Date().timeIntervalSince1970
         }
@@ -596,9 +726,10 @@ extension SessionViewModel {
     }
 
     private func presentSoloDrumProposal(bpm: Double, tempoConfidence: Double) {
-        let rounded = (bpm * 2).rounded() / 2
+        let rounded = SoloDrumPolish.roundHalfBPM(bpm)
         let style = resolvedStyleForProposal()
         let pattern = resolvedPatternForProposal(style: style)
+        refreshSuggestedSoloInstrumentCategory()
         let proposal = SoloDrumGrooveProposal(
             bpm: rounded,
             style: style,
@@ -644,17 +775,44 @@ extension SessionViewModel {
         guard soloDrumPhase == .playing else { return }
         guard soloProposedTempoShiftBPM == nil else { return }
         guard let locked = soloLockedBPM else { return }
+
+        // Flush a queued soft nudge on the next downbeat.
+        if let pending = soloPendingBeatFollowBPM {
+            if drumAccompaniment.isNearDownbeat() {
+                soloPendingBeatFollowBPM = nil
+                applyLiveBeatFollowNudge(to: pending)
+            }
+            return
+        }
+
+        // Don't shove tempo during fills / intros — keep the phrase musical.
+        if SoloDrumPolish.shouldHoldTempoFollow(during: drumAccompaniment.currentPhraseKind) {
+            return
+        }
+
         guard let drift = livePerformanceFusion.driftEstimatedBPM,
               livePerformanceFusion.driftTempoConfidence >= 0.34 else {
             soloTempoDriftSamples.removeAll()
             return
         }
-        guard abs(drift - locked) >= Self.soloTempoDriftMinDelta else {
+
+        let smoothed = SoloDrumPolish.emaBPM(
+            previous: soloBeatFollowEMA ?? locked,
+            sample: drift,
+            alpha: Self.soloBeatFollowEMAAlpha
+        )
+        soloBeatFollowEMA = smoothed
+
+        let delta = abs(smoothed - locked)
+        let sampleFloor = soloBeatFollowEnabled
+            ? Self.soloTempoFollowSoftDelta
+            : Self.soloTempoDriftMinDelta
+        guard delta >= sampleFloor else {
             soloTempoDriftSamples.removeAll()
             return
         }
 
-        soloTempoDriftSamples.append((bpm: drift, confidence: livePerformanceFusion.driftTempoConfidence))
+        soloTempoDriftSamples.append((bpm: smoothed, confidence: livePerformanceFusion.driftTempoConfidence))
         if soloTempoDriftSamples.count > 8 {
             soloTempoDriftSamples.removeFirst(soloTempoDriftSamples.count - 8)
         }
@@ -667,10 +825,87 @@ extension SessionViewModel {
         }
 
         let averaged = bpms.reduce(0, +) / Double(bpms.count)
-        soloProposedTempoShiftBPM = (averaged * 2).rounded() / 2
+        let rounded = SoloDrumPolish.roundHalfBPM(averaged)
+        let averagedDelta = abs(rounded - locked)
+
+        // Professional live follow: small stable nudges apply on the next downbeat.
+        if soloBeatFollowEnabled, averagedDelta < Self.soloTempoFollowHardDelta {
+            soloTempoDriftSamples.removeAll()
+            if drumAccompaniment.isNearDownbeat() {
+                applyLiveBeatFollowNudge(to: rounded)
+            } else {
+                soloPendingBeatFollowBPM = rounded
+            }
+            return
+        }
+
+        // Large shift (or beat-follow off): ask the host before retiming.
+        guard averagedDelta >= Self.soloTempoDriftMinDelta else {
+            soloTempoDriftSamples.removeAll()
+            return
+        }
+        soloProposedTempoShiftBPM = rounded
         soloDrumPhase = .awaitingTempoShiftConfirmation
         soloTempoDriftSamples.removeAll()
         syncHostLiveGrooveToPayload(force: true)
+    }
+
+    /// Smooth locked-groove retime for small live tempo drift (no confirmation card).
+    private func applyLiveBeatFollowNudge(to bpm: Double) {
+        guard soloTempoLocked, soloDrumPhase == .playing else { return }
+        let clamped = min(max(bpm, 48), 200)
+        let rounded = SoloDrumPolish.roundHalfBPM(clamped)
+        guard let locked = soloLockedBPM, abs(rounded - locked) >= 0.5 else { return }
+
+        soloLockedBPM = rounded
+        soloBeatFollowEMA = rounded
+        payload.tempoBPM = rounded
+        drumAccompaniment.retimeLockedGroove(to: rounded)
+        if soloBassEnabled, autoBandMode.includesBass {
+            if bassAccompaniment.isPlaying {
+                bassAccompaniment.retimeLockedGroove(to: rounded)
+            } else {
+                startBassAccompanimentIfNeeded(at: rounded)
+            }
+        }
+        if payload.isMetronomePlaying {
+            alignMetronomeEpochToSoloGroove()
+            applyMetronome()
+        }
+        syncHostLiveGrooveToPayload(force: true)
+    }
+
+    func refreshSoloDrumSectionDynamics() {
+        guard soloAccompanimentEnabled, soloTempoLocked else {
+            drumAccompaniment.dynamicsGain = 1
+            return
+        }
+        drumAccompaniment.dynamicsGain = SoloDrumPolish.sectionDynamicsScale(for: activeSection?.kind)
+    }
+
+    func refreshSuggestedSoloInstrumentCategory() {
+        guard soloAccompanimentEnabled, soloAutoStyleEnabled else {
+            soloSuggestedInstrumentCategory = nil
+            return
+        }
+        let style = detectedLiveStyle
+        guard style != .unknown || detectedGlobalGenre != nil else {
+            soloSuggestedInstrumentCategory = nil
+            return
+        }
+        let suggested = SoloDrumPolish.suggestedInstrumentCategory(
+            style: style == .unknown ? .popRock : style,
+            globalGenre: detectedGlobalGenre
+        )
+        if suggested == soloDrumInstrumentCategory {
+            soloSuggestedInstrumentCategory = nil
+            return
+        }
+        soloSuggestedInstrumentCategory = suggested
+        // Auto-apply while listening if the host hasn't locked a manual choice.
+        if !soloInstrumentCategoryUserPicked, soloDrumPhase == .listening || soloDrumPhase == .awaitingConfirmation {
+            setSoloDrumInstrumentCategory(suggested, userPicked: false)
+        }
     }
 
     /// Publishes Mac live-groove state so iPhone guests see tempo & genre.
@@ -685,6 +920,7 @@ extension SessionViewModel {
         if soloAccompanimentEnabled {
             payload.hostLiveGrooveActive = true
             payload.hostLiveGroovePhaseRaw = soloDrumPhase.rawValue
+            payload.hostSoloInstrumentCategoryRaw = soloDrumInstrumentCategory.rawValue
 
             let style = soloPendingProposal?.style ?? detectedLiveStyle
             payload.hostLiveGrooveStyleRaw = style != .unknown ? style.rawValue : nil
@@ -713,6 +949,7 @@ extension SessionViewModel {
             payload.hostGlobalGenreID = nil
             payload.hostGlobalGenreLabel = nil
             payload.hostGlobalGenreRegionRaw = nil
+            payload.hostSoloInstrumentCategoryRaw = nil
         }
 
         let signature = payload.hostLiveGrooveGuestSignature()
@@ -726,15 +963,21 @@ extension SessionViewModel {
     }
 
     func resetSoloTempoLock() {
+        soloDrumEntranceTask?.cancel()
+        soloDrumEntranceTask = nil
         soloTempoLocked = false
         soloLockedBPM = nil
         soloTempoLockSamples.removeAll()
         soloTempoDriftSamples.removeAll()
+        soloBeatFollowEMA = nil
+        soloPendingBeatFollowBPM = nil
         soloPlayingSince = nil
         lastStyleLearnTime = 0
         lastServiceLearningAutoSaveFingerprint = nil
         livePerformanceFusion.grooveLocked = false
         livePerformanceFusion.resetDriftAnalysis()
+        drumAccompaniment.entranceGain = 1
+        drumAccompaniment.dynamicsGain = 1
         drumAccompaniment.unfreezeGroove()
         stopAutoBandAccompaniment(force: true)
         refreshSoloAudioCapturePolicy()
@@ -747,9 +990,11 @@ extension SessionViewModel {
         let drumPattern = pattern ?? soloDrumPattern
         soloDrumPattern = drumPattern
 
-        let rounded = (bpm * 2).rounded() / 2
+        let rounded = SoloDrumPolish.roundHalfBPM(bpm)
         soloTempoLocked = true
         soloLockedBPM = rounded
+        soloBeatFollowEMA = rounded
+        soloPendingBeatFollowBPM = nil
         soloTempoLockSamples.removeAll()
         livePerformanceFusion.grooveLocked = true
 
@@ -758,19 +1003,26 @@ extension SessionViewModel {
 
         let beats = max(1, payload.beatsPerBar)
         if autoBandMode.includesDrums {
-            drumAccompaniment.volume = soloDrumVolume
             if let learned = activeLearnedDrumPattern, !learned.isEmpty {
                 drumAccompaniment.setLearnedPattern(learned)
             } else {
                 drumAccompaniment.setLearnedPattern(nil)
             }
+            soloDrumLoopPack = DrumMIDILoopPack.pack(for: drumPattern)
+            applySoloDrumLoopSettingsToEngine()
+            // Start silent (or full) — count-in fades the kit in on bar 1.
+            drumAccompaniment.volume = soloDrumVolume
+            drumAccompaniment.entranceGain = soloDrumCountInBars > 0 ? 0 : 1
             drumAccompaniment.start(bpm: rounded, pattern: drumPattern, beatsPerBar: beats)
             drumAccompaniment.freezeGroove()
+            refreshSoloDrumSectionDynamics()
+            scheduleSoloDrumEntranceFadeIn(bpm: rounded, beatsPerBar: beats)
         }
         if activeLearnedBassLine == nil, soloAutoStyleEnabled {
             soloBassStyle = suggestedBassStyle(for: detectedLiveStyle)
         }
         if soloBassEnabled, autoBandMode.includesBass {
+            bassAccompaniment.kickPocketLock = true
             startBassAccompanimentIfNeeded(at: rounded)
         }
         // Arm metronome after the groove clock exists so phase can lock to the drum grid.
@@ -778,6 +1030,35 @@ extension SessionViewModel {
         autoSaveServiceLearningOnDrumLockIfNeeded()
         refreshSessionAudioPolicy()
         syncHostLiveGrooveToPayload(force: true)
+    }
+
+    /// Silent count-in (0–2 bars) then a short fade so drums enter on the grid.
+    private func scheduleSoloDrumEntranceFadeIn(bpm: Double, beatsPerBar: Int) {
+        soloDrumEntranceTask?.cancel()
+        let bars = soloDrumCountInBars
+        guard bars > 0 else {
+            drumAccompaniment.entranceGain = 1
+            return
+        }
+        let barSeconds = (60.0 / max(48, bpm)) * Double(max(1, beatsPerBar))
+        let delay = barSeconds * Double(bars)
+        drumAccompaniment.entranceGain = 0
+        soloDrumEntranceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.soloTempoLocked else { return }
+            await self.fadeInSoloDrumEntrance(duration: 0.32)
+        }
+    }
+
+    private func fadeInSoloDrumEntrance(duration: Double) async {
+        let steps = 8
+        let slice = duration / Double(steps)
+        for i in 1...steps {
+            guard soloTempoLocked, !Task.isCancelled else { return }
+            drumAccompaniment.entranceGain = Float(i) / Float(steps)
+            try? await Task.sleep(for: .seconds(slice))
+        }
+        drumAccompaniment.entranceGain = 1
     }
 
     private func applyAutoDetectedStyleIfNeeded() {
@@ -812,6 +1093,7 @@ extension SessionViewModel {
 
         drumAccompaniment.volume = soloDrumVolume
         drumAccompaniment.setLearnedPattern(nil)
+        applySoloDrumLoopSettingsToEngine()
         drumAccompaniment.start(bpm: bpm, pattern: soloDrumPattern, beatsPerBar: beats)
 
         if soloBassEnabled, autoBandMode.includesBass, soloTempoLocked {
@@ -835,7 +1117,13 @@ enum LiveGroovePreset: String, CaseIterable, Identifiable {
     case merengue
     case salsa
     case songo
+    case bachata
+    case cumbia
+    case dembow
     case funk
+    case hipHop
+    case afrobeat
+    case disco
 
     var id: String { rawValue }
 
@@ -847,7 +1135,13 @@ enum LiveGroovePreset: String, CaseIterable, Identifiable {
         case .merengue: String(localized: "Merengue")
         case .salsa: String(localized: "Salsa")
         case .songo: String(localized: "Songó")
+        case .bachata: String(localized: "Bachata")
+        case .cumbia: String(localized: "Cumbia")
+        case .dembow: String(localized: "Dembow")
         case .funk: String(localized: "Funk")
+        case .hipHop: String(localized: "Hip-hop")
+        case .afrobeat: String(localized: "Afrobeat")
+        case .disco: String(localized: "Disco")
         }
     }
 
@@ -859,7 +1153,13 @@ enum LiveGroovePreset: String, CaseIterable, Identifiable {
         case .merengue: .merengue
         case .salsa: .salsa
         case .songo: .songo
+        case .bachata: .bachata
+        case .cumbia: .cumbia
+        case .dembow: .dembow
         case .funk: .funkGroove
+        case .hipHop: .hipHopBoomBap
+        case .afrobeat: .afrobeat
+        case .disco: .discoFour
         }
     }
 
@@ -869,9 +1169,10 @@ enum LiveGroovePreset: String, CaseIterable, Identifiable {
         case .slowBallad: .slowBallad
         case .gospelUptempo: .worshipPocket
         case .merengue: .merengueOctave
-        case .salsa: .latinTumbao
-        case .songo: .songoPulse
-        case .funk: .funkPocket
+        case .salsa, .bachata, .cumbia: .latinTumbao
+        case .songo, .afrobeat: .songoPulse
+        case .dembow, .funk, .hipHop: .funkPocket
+        case .disco: .worshipPocket
         }
     }
 }

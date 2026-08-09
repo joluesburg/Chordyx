@@ -540,3 +540,101 @@ struct ChromaticToneNamesTests {
     }
 }
 
+struct MetronomeDrumPhaseLockTests {
+
+    @Test func quarterNoteGridKeepsClickAccentOnDrumDownbeats() {
+        let bpm = 120.0
+        // Sample several bar starts (0, 1, 2 bars of 16 sixteenths).
+        for bar in 0..<8 {
+            let elapsed = Double(bar * 16) * ((60.0 / bpm) / 4.0)
+            #expect(
+                MetronomePhaseMath.drumDownbeatMatchesClickAccent(
+                    elapsed: elapsed,
+                    bpm: bpm,
+                    beatsPerBar: 4,
+                    beatUnit: 4
+                )
+            )
+        }
+    }
+
+    @Test func wrongBeatUnitBreaksDrumLock() {
+        let bpm = 120.0
+        let elapsed = 0.0
+        #expect(
+            MetronomePhaseMath.drumDownbeatMatchesClickAccent(
+                elapsed: elapsed,
+                bpm: bpm,
+                beatsPerBar: 4,
+                beatUnit: 4
+            )
+        )
+        // beatUnit 8 halves the click period vs the drum quarter grid.
+        let spb8 = MetronomePhaseMath.secondsPerBeat(bpm: bpm, beatUnit: 8)
+        let spb4 = MetronomePhaseMath.secondsPerBeat(bpm: bpm, beatUnit: 4)
+        #expect(abs(spb8 - spb4 / 2) < 0.0001)
+    }
+
+    @Test func floorBeatIndexMatchesDrumStyleTruncation() {
+        let spb = 0.5 // 120 BPM quarters
+        #expect(MetronomePhaseMath.absoluteBeatIndex(elapsed: 0.0, secondsPerBeat: spb) == 0)
+        #expect(MetronomePhaseMath.absoluteBeatIndex(elapsed: 0.49, secondsPerBeat: spb) == 0)
+        #expect(MetronomePhaseMath.absoluteBeatIndex(elapsed: 0.50, secondsPerBeat: spb) == 1)
+        #expect(MetronomePhaseMath.beatInBar(absoluteBeat: 4, beatsPerBar: 4) == 0)
+    }
+
+    @Test func sharedEpochKeepsMetronomeAndDrumQuartersAligned() {
+        let bpm = 96.0
+        let epoch = 1_700_000_000.0
+        let sixteenth = (60.0 / bpm) / 4.0
+        for absoluteStep in stride(from: 0, through: 64, by: 4) {
+            let elapsed = Double(absoluteStep) * sixteenth
+            let hostNow = epoch + elapsed
+            let spb = MetronomePhaseMath.secondsPerBeat(bpm: bpm, beatUnit: 4)
+            let beat = MetronomePhaseMath.absoluteBeatIndex(
+                elapsed: hostNow - epoch,
+                secondsPerBeat: spb
+            )
+            let stepInBar = absoluteStep % 16
+            #expect(DrumMetronomeSyncMath.isQuarterStep(stepInBar))
+            #expect(MetronomePhaseMath.beatInBar(absoluteBeat: beat, beatsPerBar: 4) == stepInBar / 4)
+            if stepInBar == 0 {
+                #expect(
+                    MetronomePhaseMath.drumDownbeatMatchesClickAccent(
+                        elapsed: elapsed,
+                        bpm: bpm,
+                        beatsPerBar: 4,
+                        beatUnit: 4
+                    )
+                )
+            }
+        }
+    }
+}
+
+struct DrumMetronomeClickThroughTests {
+
+    @Test func quartersAndDownbeatsAlignForClickThrough() {
+        for step in 0..<16 {
+            let isQuarter = step % 4 == 0
+            #expect(DrumMetronomeSyncMath.isQuarterStep(step) == isQuarter)
+            #expect(DrumMetronomeSyncMath.isDownbeatStep(step) == (step == 0))
+            if isQuarter {
+                #expect(DrumMetronomeSyncMath.beatInBar(forSixteenthStep: step) == step / 4)
+            }
+        }
+        #expect(DrumMetronomeSyncMath.isDownbeatStep(16))
+        #expect(DrumMetronomeSyncMath.beatInBar(forSixteenthStep: 20) == 1)
+    }
+
+    @Test func clickThroughZerosDelayOnlyOnQuarters() {
+        #expect(DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 0))
+        #expect(DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 4))
+        #expect(DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 8))
+        #expect(DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 12))
+        #expect(!DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 2))
+        #expect(!DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: true, stepInBar: 6))
+        #expect(!DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: false, stepInBar: 0))
+    }
+}
+

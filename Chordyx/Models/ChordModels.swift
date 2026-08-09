@@ -437,6 +437,9 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     /// `GlobalMusicRegion.rawValue` for guest region badge.
     var hostGlobalGenreRegionRaw: String?
 
+    /// `SoloDrumInstrumentCategory.rawValue` for guest / sync display.
+    var hostSoloInstrumentCategoryRaw: String?
+
     static let empty = SessionSyncPayload(
         sessionName: "",
         key: .C,

@@ -193,6 +193,7 @@ private enum AudioStyleOutputWeights {
             switch style.category {
             case .worship: 0.05
             case .popRock: 0.0
+            case .urban: 0.03
             case .jazzBlues: 0.02
             case .latin: 0.04
             case .world: -0.02
@@ -219,12 +220,22 @@ private enum AudioStyleOutputWeights {
             set(0, 0.7); set(16, 0.6); set(18, -0.4); set(13, 0.5)
         case .rockDrive:
             set(0, 0.8); set(16, 1.1); set(19, 0.9); set(13, 0.6)
+        case .halfTimeRock:
+            set(0, 0.55); set(16, -0.4); set(18, 0.35); set(13, 0.45)
         case .funkGroove:
             set(4, 1.0); set(18, 1.2); set(20, 0.8); set(9, 0.7)
         case .rbSoul:
             set(14, 0.9); set(16, 0.4); set(18, 0.5); set(10, 0.5)
+        case .discoFour:
+            set(0, 0.75); set(16, 1.05); set(18, -0.55); set(19, 0.85)
         case .edmPulse:
             set(0, 0.6); set(16, 1.0); set(18, -0.8); set(19, 1.0)
+        case .hipHopBoomBap:
+            set(4, 0.85); set(18, 0.7); set(16, -0.35); set(13, 0.55)
+        case .trapHalftime:
+            set(0, 0.5); set(16, -0.55); set(18, 0.45); set(19, 0.35)
+        case .dembow:
+            set(4, 0.9); set(18, 0.85); set(16, 0.25); set(13, 0.5)
         case .jazzSwing:
             set(8, 0.8); set(10, 0.9); set(14, 0.7); set(18, 0.4); set(20, 0.6)
         case .bluesShuffle:
@@ -237,12 +248,22 @@ private enum AudioStyleOutputWeights {
             set(4, 1.0); set(18, 1.2); set(14, 0.7); set(16, 0.5); set(9, 0.6)
         case .songo:
             set(4, 0.8); set(18, 1.0); set(20, 0.9); set(15, 0.7); set(23, 0.5)
+        case .bachata:
+            set(8, 0.55); set(14, 0.65); set(18, 0.35); set(16, 0.2)
+        case .cumbia:
+            set(0, 0.55); set(16, 0.7); set(18, 0.45); set(13, 0.5)
+        case .chaCha:
+            set(4, 0.7); set(18, 0.55); set(16, 0.45); set(14, 0.4)
         case .bossaNova:
             set(8, 0.7); set(14, 0.8); set(18, 0.6); set(16, 0.3); set(10, 0.5)
         case .bolero:
             set(8, 0.6); set(16, -0.8); set(18, -0.5); set(14, 0.7)
+        case .soca:
+            set(0, 0.7); set(16, 1.05); set(19, 0.8); set(18, 0.25)
         case .reggaeOneDrop:
             set(4, 0.7); set(18, 0.9); set(16, -0.3); set(14, 0.5)
+        case .afrobeat:
+            set(4, 0.95); set(18, 1.05); set(20, 0.75); set(9, 0.65)
         case .countryTrain:
             set(0, 0.65); set(13, 0.9); set(16, 0.5); set(18, -0.3)
         case .unknown:

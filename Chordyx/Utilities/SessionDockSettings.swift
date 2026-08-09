@@ -87,9 +87,9 @@ enum SessionDockSettings {
     static let sideRailWidthKey = "chordyxLiveSideRailWidth"
     static let sideRailVisibleKey = "chordyxLiveSideRailVisible"
 
-    static let sideRailMinWidth: CGFloat = 300
-    static let sideRailDefaultWidth: CGFloat = 380
-    static let sideRailMaxWidth: CGFloat = 460
+    static let sideRailMinWidth: CGFloat = 320
+    static let sideRailDefaultWidth: CGFloat = 400
+    static let sideRailMaxWidth: CGFloat = 480
     static let sideRailAutoThreshold: CGFloat = 860
 
     static func resolvedLayoutMode(

@@ -106,7 +106,11 @@ struct SessionMetronomePanel: View {
                     Slider(
                         value: Binding(
                             get: { viewModel.payload.tempoBPM },
-                            set: { viewModel.setTempo($0) }
+                            set: { newValue in
+                                // Tab remounts must not snap/retime a locked Solo groove.
+                                guard abs(newValue - viewModel.payload.tempoBPM) >= 0.99 else { return }
+                                viewModel.setTempo(newValue)
+                            }
                         ),
                         in: SessionViewModel.minBPM...SessionViewModel.maxBPM,
                         step: 1

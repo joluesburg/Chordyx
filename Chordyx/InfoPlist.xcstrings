@@ -1,270 +1,270 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "CFBundleDisplayName": {
-      "comment": "Bundle display name",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Chordyx"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Chordyx"
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         }
       }
     },
-    "CFBundleName": {
-      "comment": "Bundle name",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Chordyx"
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Chordyx"
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx"
           }
         }
       }
     },
-    "Chordyx Progression": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Progresión Chordyx"
+    "Chordyx Progression" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx Progression"
           }
         },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx Progression"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Progresión Chordyx"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Progression Chordyx"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Progression Chordyx"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Progressão Chordyx"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Progressão Chordyx"
           }
         }
       }
     },
-    "Chordyx Setlist Pack": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Paquete de lista Chordyx"
+    "Chordyx Setlist Pack" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx Setlist Pack"
           }
         },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx Setlist Pack"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paquete de lista Chordyx"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pack de setlist Chordyx"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pack de setlist Chordyx"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pack de Setlist Chordyx"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pack de Setlist Chordyx"
           }
         }
       }
     },
-    "NSBluetoothAlwaysUsageDescription": {
-      "comment": "Privacy - Bluetooth Always Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx uses Bluetooth to find nearby band members when Wi‑Fi discovery is unavailable."
+    "NSBluetoothAlwaysUsageDescription" : {
+      "comment" : "Privacy - Bluetooth Always Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx uses Bluetooth to find nearby band members when Wi‑Fi discovery is unavailable."
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx usa Bluetooth para encontrar músicos cercanos cuando no hay descubrimiento por Wi‑Fi."
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx usa Bluetooth para encontrar músicos cercanos cuando no hay descubrimiento por Wi‑Fi."
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx utilise le Bluetooth pour trouver les membres du groupe à proximité lorsque la découverte Wi‑Fi est indisponible."
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx utilise le Bluetooth pour trouver les membres du groupe à proximité lorsque la découverte Wi‑Fi est indisponible."
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Chordyx usa Bluetooth para encontrar membros da banda por perto quando a descoberta por Wi‑Fi não estiver disponível."
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Chordyx usa Bluetooth para encontrar membros da banda por perto quando a descoberta por Wi‑Fi não estiver disponível."
           }
         }
       }
     },
-    "NSCameraUsageDescription": {
-      "comment": "Privacy - Camera Usage Description",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Chordyx scans printed chord sheets with your camera to build a song progression automatically."
+    "NSCameraUsageDescription" : {
+      "comment" : "Privacy - Camera Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Chordyx scans printed chord sheets with your camera to build a song progression automatically."
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx escanea partituras con acordes con la cámara para crear la progresión automáticamente."
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx escanea partituras con acordes con la cámara para crear la progresión automáticamente."
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx scanne les grilles d’accords imprimées avec votre caméra pour créer automatiquement une progression de chanson."
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx scanne les grilles d’accords imprimées avec votre caméra pour créer automatiquement une progression de chanson."
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Chordyx escaneia cifras impressas com a câmera para montar automaticamente a progressão da música."
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Chordyx escaneia cifras impressas com a câmera para montar automaticamente a progressão da música."
           }
         }
       }
     },
-    "NSLocalNetworkUsageDescription": {
-      "comment": "Privacy - Local Network Usage Description",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx finds nearby band members on your local network so you can host or join a live chord session."
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Privacy - Local Network Usage Description",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx finds nearby band members on your local network so you can host or join a live chord session."
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx encuentra músicos cercanos en tu red local para que puedas ser host o unirte a una sesión de acordes en vivo."
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx encuentra músicos cercanos en tu red local para que puedas ser host o unirte a una sesión de acordes en vivo."
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx trouve les membres du groupe à proximité sur votre réseau local afin que vous puissiez héberger ou rejoindre une session d’accords en direct."
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx trouve les membres du groupe à proximité sur votre réseau local afin que vous puissiez héberger ou rejoindre une session d’accords en direct."
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Chordyx encontra membros da banda na sua rede local para você ser host ou entrar em uma sessão de acordes ao vivo."
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Chordyx encontra membros da banda na sua rede local para você ser host ou entrar em uma sessão de acordes ao vivo."
           }
         }
       }
     },
-    "NSMicrophoneUsageDescription": {
-      "comment": "Privacy - Microphone Usage Description",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Chordyx listens to your piano through the microphone to detect tempo and musical style with audio AI for solo drum accompaniment."
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Privacy - Microphone Usage Description",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Chordyx listens to your piano through the microphone to detect tempo and musical style with audio AI for solo drum accompaniment."
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx escucha tu piano por el micrófono para detectar tempo y estilo musical con IA de audio para el acompañamiento de batería en solitario."
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx escucha tu piano por el micrófono para detectar tempo y estilo musical con IA de audio para el acompañamiento de batería en solitario."
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx écoute votre piano via le microphone pour détecter le tempo et le style musical avec l’IA audio pour l’accompagnement de batterie en solo."
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx écoute votre piano via le microphone pour détecter le tempo et le style musical avec l’IA audio pour l’accompagnement de batterie en solo."
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Chordyx escuta seu piano pelo microfone para detectar o tempo e o estilo musical com AI de áudio para acompanhamento de bateria solo."
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Chordyx escuta seu piano pelo microfone para detectar o tempo e o estilo musical com AI de áudio para acompanhamento de bateria solo."
           }
         }
       }
     },
-    "NSPhotoLibraryUsageDescription": {
-      "comment": "Privacy - Photo Library Usage Description",
-      "extractionState": "extracted_with_value",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Chordyx can import chord charts from photos in your library."
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Privacy - Photo Library Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Chordyx can import chord charts from photos in your library."
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx puede importar canciones desde fotos de tu biblioteca."
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx puede importar canciones desde fotos de tu biblioteca."
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chordyx peut importer des grilles d’accords à partir de photos de votre bibliothèque."
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chordyx peut importer des grilles d’accords à partir de photos de votre bibliothèque."
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Chordyx pode importar cifras a partir de fotos da sua biblioteca."
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Chordyx pode importar cifras a partir de fotos da sua biblioteca."
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }
