@@ -103,13 +103,19 @@ enum LiveKeyIntelligence: Sendable {
 
         let ranked = scores.sorted { $0.value > $1.value }
         guard let best = ranked.first, best.value > 0.01, ranked.count >= 2 else { return nil }
-        let runnerUp = ranked[1].value
-        let margin = best.value - runnerUp
-        let confidence = min(1, max(0.12, margin / max(best.value, 0.01)))
+        let resolvedKey = KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: normalized,
+            scores: scores,
+            currentBest: best.key
+        )
+        let runnerUp = ranked.first(where: { $0.key != resolvedKey })?.value ?? ranked[1].value
+        let bestValue = max(scores[resolvedKey] ?? 0, best.value)
+        let margin = bestValue - runnerUp
+        let confidence = min(1, max(0.12, margin / max(bestValue, 0.01)))
 
         return Breakdown(
             scores: scores,
-            bestKey: best.key,
+            bestKey: resolvedKey,
             confidence: confidence,
             contributors: contributors
         )

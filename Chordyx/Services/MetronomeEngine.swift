@@ -3,9 +3,9 @@
 //  Chordyx
 //
 
-import Foundation
 import AVFoundation
-import Observation
+import Combine
+import Foundation
 
 #if os(iOS)
 private struct AudioInterruptionSnapshot: Sendable {
@@ -74,31 +74,29 @@ enum MetronomePhaseMath {
     }
 }
 
-@Observable
 @MainActor
-final class MetronomeEngine {
-    private(set) var currentBeat: Int = -1
-    private(set) var isRunning = false
-    private(set) var isCountingIn = false
+final class MetronomeEngine: ObservableObject {
+    @Published private(set) var currentBeat: Int = -1
+    @Published private(set) var isRunning = false
+    @Published private(set) var isCountingIn = false
     /// Beats left in the count-in (4, 3, 2, 1…), synced for UI.
-    private(set) var countInBeatsRemaining: Int = 0
+    @Published private(set) var countInBeatsRemaining: Int = 0
 
-    var volume: Float = 0.8 {
+    @Published var volume: Float = 0.8 {
         didSet { clickPlayer.volume = volume }
     }
 
-    /// When false, wall-clock phase / `onBeat` still run but no local click is scheduled.
-    /// Used for guest mute and for Solo Drums click-through (audible click lives on
-    /// `DrumAccompanimentEngine` so kit + click share one AVAudioEngine).
-    var localAudioEnabled: Bool = true
+    /// When false, wall-clock phase / `onBeat` still run but no local click is scheduled
+    /// (guest mute, acoustic room mode, etc.).
+    @Published var localAudioEnabled: Bool = true
 
-    /// Convenience for Solo Drums click-through / silent phase tracking.
+    /// Convenience for mute / silent phase tracking.
     func setLocalAudioEnabled(_ enabled: Bool) {
         localAudioEnabled = enabled
     }
 
     /// Route metronome to headphones when plugged in instead of forcing the speaker.
-    var preferHeadphoneOutput: Bool = false {
+    @Published var preferHeadphoneOutput: Bool = false {
         didSet {
             #if os(iOS)
             configureAudioSessionCategory()
@@ -108,11 +106,12 @@ final class MetronomeEngine {
 
     var onBeat: ((Int, Bool, Bool) -> Void)?
 
-    private let engine = AVAudioEngine()
+    /// Created when the click first starts — never during SessionViewModel / splash launch.
+    private lazy var engine = AVAudioEngine()
     /// Metronome clicks only — never share this node with the keep-alive loop.
-    private let clickPlayer = AVAudioPlayerNode()
+    private lazy var clickPlayer = AVAudioPlayerNode()
     /// Near-silent loop keeps the audio session alive in background without blocking clicks.
-    private let keepAlivePlayer = AVAudioPlayerNode()
+    private lazy var keepAlivePlayer = AVAudioPlayerNode()
     private var accentBuffer: AVAudioPCMBuffer?
     private var normalBuffer: AVAudioPCMBuffer?
     private var countInBuffer: AVAudioPCMBuffer?
@@ -124,12 +123,16 @@ final class MetronomeEngine {
     /// Last absolute beat index fired from the wall-clock grid (avoids DispatchSource drift).
     private var lastFiredAbsoluteBeat = -1
     #if os(iOS)
-    private let audioInterruptionObserver: AudioInterruptionObserver
+    private lazy var audioInterruptionObserver = AudioInterruptionObserver()
+    private var didBindInterruption = false
     #endif
 
-    init() {
+    init() {}
+
+    private func bindInterruptionIfNeeded() {
         #if os(iOS)
-        audioInterruptionObserver = AudioInterruptionObserver()
+        guard !didBindInterruption else { return }
+        didBindInterruption = true
         audioInterruptionObserver.bind { [weak self] snapshot in
             self?.handleAudioInterruption(snapshot)
         }
@@ -356,6 +359,7 @@ final class MetronomeEngine {
     private func configureAudioIfNeeded() {
         guard !didConfigureAudio else { return }
         didConfigureAudio = true
+        bindInterruptionIfNeeded()
 
         #if os(iOS)
         configureAudioSessionCategory()

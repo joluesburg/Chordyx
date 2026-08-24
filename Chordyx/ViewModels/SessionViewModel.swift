@@ -4,8 +4,8 @@
 //
 
 import Foundation
-import MultipeerConnectivity
-import Observation
+import Combine
+@preconcurrency import MultipeerConnectivity
 #if os(iOS)
 import UIKit
 import AudioToolbox
@@ -13,89 +13,54 @@ import AudioToolbox
 import AppKit
 #endif
 
-@Observable
+/// Heap box so `SessionSyncPayload` is not a stored struct on `SessionViewModel`
+/// (that copy during `init` contributed to iPhone stack overflow).
 @MainActor
-final class SessionViewModel {
-    let sessionManager = SessionManager()
-    let cloudRelay = InternetSessionRelayCoordinator()
-    let metronome = MetronomeEngine()
-    let backingTrack = BackingTrackEngine()
-    let midi = MIDIInputManager()
+private final class SessionPayloadBox {
+    var value = SessionSyncPayload.empty
+}
+
+/// Not `@Observable`: that macro blew the iPhone main-thread stack during `init`
+/// (`EXC_BAD_ACCESS code=2` at 0x16…) because this type has hundreds of stored properties.
+@MainActor
+final class SessionViewModel: ObservableObject {
+    /// Nested services are lazy — constructing them in `init` froze iPhone (EXC_BAD_ACCESS code=2).
+    private var nestedCancellables = Set<AnyCancellable>()
+
+    private func forwardObjectWillChange(_ publisher: ObservableObjectPublisher) {
+        publisher
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &nestedCancellables)
+    }
+
+    lazy var sessionManager: SessionManager = {
+        let manager = SessionManager()
+        forwardObjectWillChange(manager.objectWillChange)
+        return manager
+    }()
+    lazy var cloudRelay: InternetSessionRelayCoordinator = {
+        let relay = InternetSessionRelayCoordinator()
+        forwardObjectWillChange(relay.objectWillChange)
+        return relay
+    }()
+    lazy var metronome: MetronomeEngine = {
+        let engine = MetronomeEngine()
+        forwardObjectWillChange(engine.objectWillChange)
+        return engine
+    }()
+    lazy var backingTrack: BackingTrackEngine = {
+        let engine = BackingTrackEngine()
+        forwardObjectWillChange(engine.objectWillChange)
+        return engine
+    }()
+    lazy var midi = MIDIInputManager()
     #if os(macOS) || os(iOS)
-    let livePerformanceFusion = LivePerformanceFusionEngine()
-    let drumAccompaniment = DrumAccompanimentEngine()
-    var soloAccompanimentEnabled = false
-    var soloDrumPhase: SoloDrumWorkflowPhase = .idle
-    var soloPendingProposal: SoloDrumGrooveProposal?
-    var soloProposedTempoShiftBPM: Double?
-    var soloTempoDriftSamples: [(bpm: Double, confidence: Double)] = []
-    var soloAudioAIEnabled = false // opt-in; MIDI tempo works without mic
-    var soloAutoStyleEnabled = true
-    var soloDrumPattern: DrumPattern = .worshipBallad
-    var soloDrumVolume: Float = 0.72
-    var soloDrumArrangeMode: DrumArrangeMode = .auto
-    var soloDrumLoopPack: DrumMIDILoopPack = .worship
-    var soloDrumHybridLayers = true
-    /// Kit / percussion family — remaps groove voices (batería, percusión, etc.).
-    var soloDrumInstrumentCategory: SoloDrumInstrumentCategory = SoloDrumInstrumentCategoryStore.load()
-    /// Alternate slot for instant A/B category audition without stopping the loop.
-    var soloDrumInstrumentCategoryB: SoloDrumInstrumentCategory = .lightPercussion
-    /// True after the host manually picks a category (blocks auto-suggest overwrite).
-    var soloInstrumentCategoryUserPicked = false
-    /// Suggested category from live genre (UI chip).
-    var soloSuggestedInstrumentCategory: SoloDrumInstrumentCategory?
-    /// When locked, small tempo drifts retimed live; large shifts still ask for OK.
-    var soloBeatFollowEnabled = SoloDrumBeatFollowStore.load()
-    /// EMA of live drift BPM for musical follow.
-    var soloBeatFollowEMA: Double?
-    /// Pending soft retime waiting for the next downbeat.
-    var soloPendingBeatFollowBPM: Double?
-    /// Bars of silent count-in before drums fade in on lock (0 = immediate).
-    var soloDrumCountInBars: Int = 1
-    var soloDrumEntranceTask: Task<Void, Never>?
-    var soloUserMIDILoops: [UserMIDIDrumLoop] = UserMIDIDrumLoopStore.load()
-    var activeUserMIDIDrumLoopID: UUID?
-    var lastTrackedPianoNotes: [Int] = []
-    var lastTrackedChordSymbol: String?
-    var soloTempoLocked = false
-    var soloLockedBPM: Double?
-    var soloTempoLockSamples: [(bpm: Double, confidence: Double)] = []
-    var soloPlayingSince: TimeInterval?
-    var lastStyleLearnTime: TimeInterval = 0
-    static let soloStyleLearnThrottle: TimeInterval = 0.4
-    static let soloTempoLockConfidenceThreshold = 0.36
-    static let soloTempoLockSampleCount = 5
-    static let soloTempoLockMaxSpread = 6.0
-    static let soloTempoProposalFallbackDelay: TimeInterval = 18
-    /// Minimum ΔBPM before Solo Drums offers a tempo-shift confirmation (beat-follow off).
-    static let soloTempoDriftMinDelta = 6.0
-    /// Soft floor for live beat-follow nudges while locked.
-    static let soloTempoFollowSoftDelta = 2.0
-    /// Large drifts always ask for confirmation even with beat-follow on.
-    static let soloTempoFollowHardDelta = 8.0
-    static let soloTempoDriftSampleCount = 4
-    static let soloBeatFollowEMAAlpha = 0.28
-    /// True after Solo Drums auto-armed a synced metronome for this lock cycle.
-    var soloDrumsMetronomeArmed = false
-    var lastHostLiveGroovePayloadSync: TimeInterval = 0
-    static let hostLiveGroovePayloadSyncThrottle: TimeInterval = 0.45
-    var serviceLearningEnabled = false
-    var serviceLearningAutoSaveOnLock = true
-    var serviceLearningRecords: [ServiceLearningRecord] = []
-    var lastServiceLearningSaveMessage: String?
-    var lastServiceLearningAutoSaveFingerprint: String?
-    let bassAccompaniment = BassAccompanimentEngine()
-    let bandStemLearning = BandStemLearningEngine()
-    var soloBassEnabled = false
-    var soloBassStyle: BassAccompanimentStyle = .worshipPocket
-    var soloBassVolume: Float = 0.65
-    var autoBandMode: AutoBandMode = .off
-    var bandStemLearningEnabled = false
-    var activeLearnedDrumPattern: LearnedDrumPattern?
-    var activeLearnedBassLine: LearnedBassLine?
+    lazy var livePerformanceFusion = LivePerformanceFusionEngine()
     #endif
     #if os(iOS)
-    private let sessionBackground = SessionBackgroundManager()
+    private lazy var sessionBackground = SessionBackgroundManager()
     #endif
 
     var midiSources: [String] = []
@@ -111,7 +76,6 @@ final class SessionViewModel {
     private var liveChordSymbolClearTask: Task<Void, Never>?
     private var pianoNotesSyncTask: Task<Void, Never>?
     private var lastSyncedPianoNotes: [Int] = []
-    var groovePreviewTask: Task<Void, Never>?
     private var outboundSyncTask: Task<Void, Never>?
     private var outboundSyncNeedsFull = false
     private var outboundSyncLivePending = false
@@ -124,6 +88,8 @@ final class SessionViewModel {
     private var liveWireRevision: UInt64 = 0
     private var lastAppliedLiveWireRevision: UInt64 = 0
     private var outboundSyncImmediate = false
+    /// Host state that arrived before `isInSession` flipped during join.
+    private var pendingGuestPayload: SessionSyncPayload?
     private var lastGuestMetronomeSignature: MetronomeSyncSignature?
     private var sectionCountdownTask: Task<Void, Never>?
     private var handoffCountdownTask: Task<Void, Never>?
@@ -154,7 +120,7 @@ final class SessionViewModel {
     private static let autoKeyCommitConfidence: Double = 0.48
     /// Challenger must clear the locked key by this margin (unless trusted source / absolute floor).
     private static let autoKeyFlipMargin: Double = 0.14
-    private let progressionInference = ProgressionInferenceEngine()
+    private lazy var progressionInference = ProgressionInferenceEngine()
     /// True after a repeating live loop was auto-applied to `payload.chords`.
     var hasInferredLiveProgression: Bool {
         get { payload.hasInferredLiveProgression }
@@ -172,17 +138,34 @@ final class SessionViewModel {
 
     var importSessionGuide: ImportSessionGuide?
     var pendingReconnectRecord: RecentSessionRecord?
-    var showReconnectBanner = false
+    var showReconnectBanner = false {
+        didSet { objectWillChange.send() }
+    }
+    /// Guest Multipeer / Internet link phase for Join + Session status chrome.
+    private(set) var guestLinkStatus: GuestLinkStatus = .idle {
+        didSet { objectWillChange.send() }
+    }
     private(set) var isRemoteLinkActive = false
     private var connectedHostDeviceName = ""
+
+    private func setGuestLinkStatus(_ status: GuestLinkStatus) {
+        guestLinkStatus = status
+    }
 
     static let minBPM: Double = 40
     static let maxBPM: Double = 240
     static let remoteBackupDefaultsKey = "chordyxRemoteBackupEnabled"
     static let showInternetJoinCodeKey = "chordyxShowInternetJoinCode"
 
-    var payload = SessionSyncPayload.empty
-    var isInSession = false
+    /// Heap-allocated so `SessionViewModel.init` does not copy this large struct on the stack.
+    private let payloadBox = SessionPayloadBox()
+    var payload: SessionSyncPayload {
+        get { payloadBox.value }
+        set { payloadBox.value = newValue }
+    }
+    var isInSession = false {
+        didSet { objectWillChange.send() }
+    }
     var isPracticeMode = false
     var role: SessionRole = .none
     /// Guest-side optimistic chat rows until the host echoes them back.
@@ -227,19 +210,13 @@ final class SessionViewModel {
         return sessionManager.syncQuality
     }
 
-    /// Single tempo source for UI + metronome (guests follow Mac live groove when active).
+    /// Single tempo source for UI + metronome.
     var displayedSessionTempoBPM: Double {
-        if role == .guest, let groove = payload.guestLiveGrooveDisplayBPM {
-            return groove
-        }
-        return payload.tempoBPM
+        payload.tempoBPM
     }
 
     var displayedMetronomePlaying: Bool {
-        if role == .guest, payload.guestShouldFollowHostLiveGrooveMetronome {
-            return true
-        }
-        return payload.isMetronomePlaying
+        payload.isMetronomePlaying
     }
 
     var sortedChords: [ChordEntry] {
@@ -392,6 +369,11 @@ final class SessionViewModel {
         return payload.notation
     }
 
+    /// True while Auto-key is on but has not committed a tonic yet.
+    var isAutoKeyStillListening: Bool {
+        payload.autoDetectKey && !payload.isKeyAutoDetected
+    }
+
     /// Session key glyph for UI — never shows a tonic letter while Auto is still listening.
     func autoKeyDisplayGlyph(isGuest: Bool) -> String? {
         guard payload.autoDetectKey else {
@@ -399,6 +381,30 @@ final class SessionViewModel {
         }
         guard payload.isKeyAutoDetected else { return nil }
         return displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+    }
+
+    /// Header label: no tonic letter until Auto-key commits (Re for D, not a leftover E/Mi).
+    func autoKeyHeadline(isGuest: Bool) -> String {
+        if payload.autoDetectKey, !payload.isKeyAutoDetected {
+            return String(localized: "Detecting key…")
+        }
+        let glyph = displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+        if payload.autoDetectKey {
+            return String(format: String(localized: "Key of %@ · AI"), glyph)
+        }
+        return String(format: String(localized: "Key of %@"), glyph)
+    }
+
+    /// Compact control-chip title — same no-letter-while-listening rule.
+    func autoKeyControlTitle(isGuest: Bool) -> String {
+        if payload.autoDetectKey, !payload.isKeyAutoDetected {
+            return String(localized: "Key · AI listening")
+        }
+        let glyph = displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+        if payload.autoDetectKey {
+            return String(format: String(localized: "Key %@ · AI"), glyph)
+        }
+        return String(format: String(localized: "Key %@"), glyph)
     }
 
     /// True when `liveChordSymbol` is a bare letter/power dyad (note), not a triad/seventh.
@@ -455,20 +461,20 @@ final class SessionViewModel {
 
     private(set) var isLiveProgressionSession = false
     var loadedProgressionID: UUID?
-    private var didBootstrap = false
+    private(set) var hasBootstrapped = false
 
     init() {
+        // Intentionally empty. Creating engines / wiring callbacks here froze iPhone launch
+        // with EXC_BAD_ACCESS (code=2). `bootstrapIfNeeded()` runs after the first Home frame.
+    }
+
+    private func wireSessionManagerCallbacks() {
         sessionManager.onPayloadReceived = { [weak self] received in
-            Task { @MainActor in
-                guard let self, self.isInSession else { return }
-                self.applyGuestPayload(received, fromRemote: false)
-            }
+            self?.deliverGuestPayload(received, fromRemote: false)
         }
         sessionManager.onLiveChordReceived = { [weak self] wire in
-            Task { @MainActor(priority: .userInteractive) in
-                guard let self, self.isInSession else { return }
-                self.applyLiveChordWire(wire)
-            }
+            guard let self, self.isInSession, self.role == .guest else { return }
+            self.applyLiveChordWire(wire)
         }
         sessionManager.onControlRequest = { [weak self] action, peer in
             Task { @MainActor in
@@ -482,22 +488,49 @@ final class SessionViewModel {
                 self.handleGuestDisconnected()
             }
         }
+        sessionManager.onInviteFailed = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.role == .guest, self.isInSession else { return }
+                // During silent reconnect, keep the session open and keep trying.
+                if self.guestReconnectInProgress || self.showReconnectBanner {
+                    self.setGuestLinkStatus(.reconnecting)
+                    if self.sessionManager.connectionState == .idle {
+                        self.sessionManager.startBrowsing()
+                    }
+                    return
+                }
+                self.setGuestLinkStatus(.failed)
+                self.sessionManager.lastError = String(localized: "Couldn’t connect to the host. Try again.")
+                self.leaveSession()
+            }
+        }
         sessionManager.onPeersUpdated = { [weak self] peers in
             guard let self, self.isInSession else { return }
             if self.role == .host {
                 self.refreshPeerPresence()
                 if !peers.isEmpty {
                     self.sync()
+                    // Guests can miss the first packet if join races connect — push again.
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(300))
+                        guard let self,
+                              self.isInSession,
+                              self.role == .host,
+                              !self.sessionManager.connectedPeers.isEmpty else { return }
+                        self.sync()
+                    }
                 }
             } else if self.role == .guest, !peers.isEmpty {
                 self.isRemoteLinkActive = false
                 self.guestReconnectInProgress = false
+                self.setGuestLinkStatus(.connectedLocal)
                 if let hostName = peers.first?.displayName, !hostName.isEmpty {
                     self.connectedHostDeviceName = hostName
                 }
                 self.stopReconnectPolling()
                 self.showReconnectBanner = false
                 self.pendingReconnectRecord = nil
+                self.flushPendingGuestPayloadIfNeeded()
             }
             #if os(iOS)
             if self.isInSession {
@@ -514,6 +547,9 @@ final class SessionViewModel {
             }
             #endif
         }
+    }
+
+    private func wireMetronomeCallbacks() {
         metronome.onBeat = { [weak self] _, _, isCountIn in
             Task { @MainActor in
                 guard let self else { return }
@@ -533,44 +569,74 @@ final class SessionViewModel {
                 #endif
             }
         }
+    }
+
+    private func wireMIDIAndCloudCallbacks() {
         midi.onNotesChanged = { [weak self] notes in
             Task { @MainActor in
                 self?.handleMIDINotes(notes)
             }
         }
         midi.onSourcesChanged = { [weak self] names in
-            self?.midiSources = names
+            guard let self else { return }
+            self.midiSources = names
+            self.objectWillChange.send()
         }
         midi.onAvailableSourcesChanged = { [weak self] sources in
-            self?.midiAvailableSources = sources
+            guard let self else { return }
+            self.midiAvailableSources = sources
+            self.objectWillChange.send()
         }
         midi.onPedalAction = { [weak self] action in
             self?.handlePedalAction(action)
         }
         cloudRelay.onPayloadReceived = { [weak self] received in
-            Task { @MainActor in self?.applyGuestPayload(received, fromRemote: true) }
+            Task { @MainActor in
+                self?.deliverGuestPayload(received, fromRemote: true)
+            }
         }
         cloudRelay.onControlRequest = { [weak self] action, guestName in
             Task { @MainActor in self?.handleRemoteControlRequest(action, from: guestName) }
         }
-        #if os(macOS) || os(iOS)
+    }
+
+    #if os(macOS) || os(iOS)
+    private func wireFusionCallbacks() {
         livePerformanceFusion.onFusionUpdated = { [weak self] in
             guard let self else { return }
             self.ingestAudioKeyHintFromFusion()
-            self.syncHostLiveGrooveToPayload(force: false)
-            self.evaluateSoloAccompanimentFromFusion()
         }
-        #endif
+    }
+    #endif
+
+    /// Starts Multipeer-critical wiring immediately; defers heavy MIDI/audio bootstrap.
+    func bootstrapIfNeeded() {
+        if !hasBootstrapped {
+            hasBootstrapped = true
+            // Must be synchronous — Host/Join can start Multipeer on the same tap turn.
+            wireSessionManagerCallbacks()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.wireMetronomeCallbacks()
+                await Task.yield()
+                self.wireMIDIAndCloudCallbacks()
+                await Task.yield()
+                #if os(macOS) || os(iOS)
+                self.wireFusionCallbacks()
+                #endif
+                Task { await self.cloudRelay.refreshAccountStatus() }
+                _ = WatchSessionBridge.shared
+                self.configureFeatureBridges()
+                self.rescanMIDISources()
+            }
+            return
+        }
+        rescanMIDISources()
     }
 
-    /// Starts MIDI, Watch bridge, and cloud account refresh after the splash screen.
-    func bootstrapIfNeeded() {
-        guard !didBootstrap else { return }
-        didBootstrap = true
-        Task { await cloudRelay.refreshAccountStatus() }
+    func rescanMIDISources() {
         midi.start()
-        _ = WatchSessionBridge.shared
-        configureFeatureBridges()
+        midi.refreshSources()
     }
 
     private func handlePedalAction(_ action: MIDIPedalAction) {
@@ -606,6 +672,21 @@ final class SessionViewModel {
         }
     }
 
+    private func deliverGuestPayload(_ received: SessionSyncPayload, fromRemote: Bool) {
+        guard role == .guest else { return }
+        if isInSession {
+            applyGuestPayload(received, fromRemote: fromRemote)
+        } else if !fromRemote {
+            pendingGuestPayload = received
+        }
+    }
+
+    private func flushPendingGuestPayloadIfNeeded() {
+        guard isInSession, role == .guest, let pending = pendingGuestPayload else { return }
+        pendingGuestPayload = nil
+        applyGuestPayload(pending, fromRemote: false)
+    }
+
     private func applyGuestPayload(_ received: SessionSyncPayload, fromRemote: Bool) {
         guard isInSession, role == .guest else { return }
         if fromRemote, !sessionManager.connectedPeers.isEmpty { return }
@@ -617,7 +698,6 @@ final class SessionViewModel {
         let priorNudgeSequence = payload.silentNudgeSequence
         let priorMetronomeSignature = payload.metronomeSyncSignature()
         let priorRoles = payload.guestRoleAssignments
-        let priorHostGrooveSignature = payload.hostLiveGrooveGuestSignature()
         let priorChat = payload.bandChatMessages
 
         let mergedPayload: SessionSyncPayload
@@ -635,35 +715,41 @@ final class SessionViewModel {
             mergedPayload = received
         }
 
-        payload = mergedPayload
-        prunePendingBandChat()
-        notifyNewBandChatMessages(previous: priorChat, current: mergedPayload.bandChatMessages)
-        if role == .guest, mergedPayload.hostLiveGrooveActive {
-            payload.tempoDriftBPM = 0
+        var guestPayload = mergedPayload
+        guestPayload.isHost = false
+        if guestPayload.sessionToken != payload.sessionToken {
+            lastAppliedLiveWireRevision = 0
         }
-
+        payload = guestPayload
+        prunePendingBandChat()
+        notifyNewBandChatMessages(previous: priorChat, current: guestPayload.bandChatMessages)
         if fromRemote {
             isRemoteLinkActive = true
             sessionManager.syncQuality = .remote
             guestReconnectInProgress = false
             showReconnectBanner = false
+            if sessionManager.connectedPeers.isEmpty {
+                setGuestLinkStatus(.connectedInternet)
+            }
         } else {
             isRemoteLinkActive = false
+            if !sessionManager.connectedPeers.isEmpty {
+                setGuestLinkStatus(.connectedLocal)
+            }
         }
 
-        if priorChord != mergedPayload.activeChordID {
+        if priorChord != guestPayload.activeChordID {
             previousActiveChordID = priorChord
         }
 
-        let liveChordChanged = priorLiveSymbol != mergedPayload.liveChordSymbol
-        let chordChanged = priorChord != mergedPayload.activeChordID || liveChordChanged
-        let metronomeChanged = priorMetronomeSignature != mergedPayload.metronomeSyncSignature()
-        let hostGrooveChanged = priorHostGrooveSignature != mergedPayload.hostLiveGrooveGuestSignature()
-        let rolesChanged = priorRoles != mergedPayload.guestRoleAssignments
+        let liveChordChanged = priorLiveSymbol != guestPayload.liveChordSymbol
+        let chordChanged = priorChord != guestPayload.activeChordID || liveChordChanged
+        let metronomeChanged = priorMetronomeSignature != guestPayload.metronomeSyncSignature()
+        let rolesChanged = priorRoles != guestPayload.guestRoleAssignments
 
-        if metronomeChanged || hostGrooveChanged {
+        if metronomeChanged {
             applyMetronome()
-            lastGuestMetronomeSignature = mergedPayload.metronomeSyncSignature()
+            lastGuestMetronomeSignature = guestPayload.metronomeSyncSignature()
             reapplyGuestMetronomeAudioPreference()
         }
 
@@ -671,42 +757,51 @@ final class SessionViewModel {
             applyHostAssignedRoleIfNeeded()
         }
         acceptHostHandoffIfPending()
-        if let cue = mergedPayload.activeCue, cue.sentAt != priorCueSentAt {
+        if let cue = guestPayload.activeCue, cue.sentAt != priorCueSentAt {
             triggerCueHaptic(cue.text)
         }
-        if mergedPayload.silentNudgeSequence != priorNudgeSequence,
-           let nudge = mergedPayload.broadcastSilentNudge {
+        if guestPayload.silentNudgeSequence != priorNudgeSequence,
+           let nudge = guestPayload.broadcastSilentNudge {
             deliverSilentNudge(nudge)
         }
 
-        if chordChanged || metronomeChanged || hostGrooveChanged {
+        if chordChanged || metronomeChanged {
             pushWatchUpdate(chordChanged: chordChanged)
         }
 
-        if chordChanged || mergedPayload.activeCue?.sentAt != priorCueSentAt {
+        if chordChanged || guestPayload.activeCue?.sentAt != priorCueSentAt {
             RecentSessionStore.updateProgress(
-                sessionToken: mergedPayload.sessionToken,
-                activeChordID: mergedPayload.activeChordID,
-                progressionName: mergedPayload.sessionName
+                sessionToken: guestPayload.sessionToken,
+                activeChordID: guestPayload.activeChordID,
+                progressionName: guestPayload.sessionName
             )
         }
-        if let code = mergedPayload.remoteJoinCode {
+        if let code = guestPayload.remoteJoinCode {
             var list = RecentSessionStore.records
-            if let index = list.firstIndex(where: { $0.sessionToken == mergedPayload.sessionToken }) {
+            if let index = list.firstIndex(where: { $0.sessionToken == guestPayload.sessionToken }) {
                 list[index].remoteJoinCode = code
                 RecentSessionStore.records = list
             }
         }
         #if os(iOS)
-        if chordChanged || mergedPayload.activeCue?.sentAt != priorCueSentAt {
+        if chordChanged || guestPayload.activeCue?.sentAt != priorCueSentAt {
             refreshLockScreenDisplay(force: chordChanged)
         }
         #endif
+        objectWillChange.send()
     }
 
     private func applyLiveChordWire(_ wire: LiveChordWire) {
         guard isInSession, role == .guest else { return }
-        guard wire.sessionToken == payload.sessionToken else { return }
+        // Seed from discovery may lack sessionToken; adopt the first wire's token.
+        if wire.sessionToken != payload.sessionToken {
+            if payload.chords.isEmpty {
+                payload.sessionToken = wire.sessionToken
+                lastAppliedLiveWireRevision = 0
+            } else {
+                return
+            }
+        }
         guard wire.revision > lastAppliedLiveWireRevision else { return }
         lastAppliedLiveWireRevision = wire.revision
 
@@ -722,6 +817,7 @@ final class SessionViewModel {
             refreshLockScreenDisplay(force: true)
             #endif
         }
+        objectWillChange.send()
     }
 
     private func applyControlAction(_ action: SessionControlAction) {
@@ -739,9 +835,7 @@ final class SessionViewModel {
         case .sendCue(let cue):
             sendLiveCue(cue)
         case .passControl(let peerName):
-            if let peer = sessionManager.connectedPeers.first(where: { $0.displayName == peerName }) {
-                promoteCoHost(peer)
-            }
+            promoteCoHost(PeerReference(displayName: peerName))
         case .toggleMetronome:
             toggleMetronome()
         case .tempoNudge(let delta):
@@ -893,6 +987,19 @@ final class SessionViewModel {
         }
     }
 
+    #if os(macOS) || os(iOS)
+    /// Feed live MIDI into tempo/style fusion (Auto-key + style analysis). No accompaniment.
+    private func trackLivePerformanceFromPiano(activeNotes: [Int]) {
+        guard canDriveSession, isInSession else { return }
+        let notesAdded = !activeNotes.isEmpty
+        livePerformanceFusion.registerMIDIPerformance(
+            chordSymbol: payload.liveChordSymbol,
+            activeNoteCount: activeNotes.count,
+            newNotesAdded: notesAdded
+        )
+    }
+    #endif
+
     private func updateLiveChordSymbol(from indices: [Int]) {
         let pitchClasses = Set(indices.map { PianoNote.pitchClass(forStored: $0) })
         let bass = indices.min().map { PianoNote.pitchClass(forStored: $0) }
@@ -974,6 +1081,7 @@ final class SessionViewModel {
     }
 
     private func syncLiveCoalesced() {
+        objectWillChange.send()
         outboundSyncLivePending = true
         requestOutboundSync(delayMs: 12)
     }
@@ -1161,17 +1269,12 @@ final class SessionViewModel {
         }
     }
 
-    /// Open mic for chroma key when Auto-key is on (independent of Solo drums Audio AI).
+    /// Open mic for chroma key when Auto-key is on.
     func refreshAudioKeyAssistPolicy() {
         #if os(macOS) || os(iOS)
         guard canDriveSession, isInSession, payload.autoDetectKey else {
             livePerformanceFusion.setAudioKeyAssistEnabled(false)
             AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
-            // Stop only when nothing else needs the mic; Solo path may restart it.
-            if !livePerformanceFusion.isAudioListening {
-                return
-            }
-            // Leave capture running if Solo Audio AI still owns it.
             return
         }
         livePerformanceFusion.setAudioKeyAssistEnabled(true)
@@ -1324,8 +1427,10 @@ final class SessionViewModel {
 
         let isInitialGuess = !isKeyAutoDetected
         // Memory never gets a 1-hit lock — teach-back of bad E must not win immediately.
-        let assertiveLock = (result.confidence >= 0.68 && trustedSource && result.source != .memory)
-            || (result.source == .library && result.confidence >= 0.72)
+        // Library/memory must not 1-hit lock a letter (stale E from a previous jam).
+        let assertiveLock = (result.confidence >= 0.68 && trustedSource
+                             && result.source != .memory && result.source != .library)
+            || (result.source == .library && result.confidence >= 0.85)
         let requiredHits: Int
         if assertiveLock {
             requiredHits = (forcePeriodicReview && isKeyAutoDetected) ? 2 : 1
@@ -1615,10 +1720,35 @@ final class SessionViewModel {
     func preparePendingHostStart(_ pending: PendingHostStart, libraryStore: ProgressionStore) {
         refreshLibraryKeyHints(from: libraryStore)
         pendingHostStart = pending
+        hostStartTask?.cancel()
+        // Fallback if sheet `onDismiss` never fires (SwiftUI teardown). The task lives on
+        // the view model so cover destruction cannot cancel it.
+        hostStartTask = Task { @MainActor [weak self] in
+            #if os(macOS)
+            try? await Task.sleep(for: .milliseconds(400))
+            #else
+            try? await Task.sleep(for: .milliseconds(120))
+            #endif
+            guard let self, !Task.isCancelled else { return }
+            self.commitPendingHostStartIfNeeded()
+        }
     }
 
     /// Commit a staged host start once Host Setup is fully gone (no nested presentations).
     func commitPendingHostStartIfNeeded() {
+        // Do not cancel when pending is nil — a fallback Task may already be mid-perform.
+        guard pendingHostStart != nil else { return }
+        hostStartTask?.cancel()
+        // Leave the sheet `onDismiss` callback before swapping the root to SessionView.
+        hostStartTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled else { return }
+            self.performPendingHostStart()
+        }
+    }
+
+    private func performPendingHostStart() {
+        hostStartTask = nil
         guard let pending = pendingHostStart else { return }
         pendingHostStart = nil
         switch pending {
@@ -1660,7 +1790,6 @@ final class SessionViewModel {
             ),
             libraryStore: libraryStore
         )
-        commitPendingHostStartIfNeeded()
     }
 
     func queueHostLiveChordsSession(
@@ -1679,7 +1808,6 @@ final class SessionViewModel {
             ),
             libraryStore: libraryStore
         )
-        commitPendingHostStartIfNeeded()
     }
 
     func hostSession(
@@ -1719,7 +1847,8 @@ final class SessionViewModel {
         metronome.stop()
         hostActivationPending = true
         pushWatchUpdate()
-        // Multipeer / Live Activity / mic wait for SessionView.onAppear → completeHostActivationIfNeeded()
+        // Start Multipeer immediately — deferring to SessionView.onAppear left hosts invisible.
+        completeHostActivationIfNeeded()
     }
 
     /// Host a freestyle session — guests see only the current live chord (piano/MIDI), with no next-chord preview.
@@ -1759,40 +1888,28 @@ final class SessionViewModel {
         metronome.stop()
         hostActivationPending = true
         pushWatchUpdate()
+        completeHostActivationIfNeeded()
     }
 
-    /// Called from SessionView.onAppear — starts Multipeer only after UI is on screen and interactive.
+    /// Starts Multipeer hosting. Safe to call from Host Setup commit or SessionView.onAppear.
     func completeHostActivationIfNeeded() {
         guard hostActivationPending, isInSession, role == .host else { return }
         hostActivationPending = false
         let name = payload.sessionName
         let wantsAutoKey = payload.autoDetectKey
 
-        // Yield one frame so SwiftUI can finish layout before Multipeer / audio work.
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(50))
-            guard let self, self.isInSession, self.role == .host else { return }
-            self.beginHostingSession(named: name)
-            self.activateSessionBackgroundServices()
-            if wantsAutoKey {
-                self.startPeriodicKeyReviewIfNeeded()
-                // Do NOT open the mic automatically — AVAudioSession/engine during host start
-                // freezes iPhone. Auto-key still works from piano/MIDI chords; mic assist is opt-in later.
-            }
+        beginHostingSession(named: name)
+        activateSessionBackgroundServices()
+        if wantsAutoKey {
+            startPeriodicKeyReviewIfNeeded()
+            // Do NOT open the mic automatically — AVAudioSession/engine during host start
+            // freezes iPhone. Auto-key still works from piano/MIDI chords; mic assist is opt-in later.
         }
     }
 
-    /// Finish hosting work after SwiftUI has a chance to present SessionView.
-    private func schedulePostHostActivation(named name: String, autoDetectKey: Bool) {
-        hostActivationPending = true
-        pushWatchUpdate()
-        // Kept for older call sites; prefer completeHostActivationIfNeeded() from SessionView.
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self else { return }
-            self.completeHostActivationIfNeeded()
-        }
+    /// Kept for older call sites that scheduled a delayed activation.
+    private func schedulePostHostActivation() {
+        completeHostActivationIfNeeded()
     }
 
     func hostSession(from saved: SavedProgression, importGuide: ImportSessionGuide? = nil) {
@@ -2077,16 +2194,6 @@ final class SessionViewModel {
         )
     }
 
-    #if os(macOS) || os(iOS)
-    func applyChordsFromServiceLearning(_ chords: [ChordEntry]) {
-        guard !chords.isEmpty else { return }
-        let sorted = chords.sorted { $0.order < $1.order }
-        payload.chords = sorted
-        payload.activeChordID = sorted.first?.id
-        isLiveProgressionSession = false
-    }
-    #endif
-
     func setRehearsalNotes(_ notes: String) {
         guard canDriveSession else { return }
         payload.rehearsalNotes = notes
@@ -2105,7 +2212,7 @@ final class SessionViewModel {
         sync()
     }
 
-    func passControl(to peer: MCPeerID) {
+    func passControl(to peer: PeerReference) {
         guard role == .host else { return }
         promoteCoHost(peer)
     }
@@ -2127,24 +2234,31 @@ final class SessionViewModel {
         pendingReconnectRecord = record
         connectedHostDeviceName = record.hostDeviceName
         showReconnectBanner = true
+        guestReconnectInProgress = true
         role = .guest
         isPracticeMode = false
+        setGuestLinkStatus(.reconnecting)
         sessionManager.startBrowsing()
         startReconnectPolling()
     }
 
     func tryAutoReconnectIfPossible() {
         guard let record = pendingReconnectRecord else { return }
-        guard showReconnectBanner else { return }
+        guard showReconnectBanner || guestReconnectInProgress else { return }
         if case .connected = sessionManager.connectionState { return }
         if !sessionManager.connectedPeers.isEmpty { return }
         if sessionManager.isInviting { return }
 
-        if let host = sessionManager.discoveredHosts.first(where: { host in
-            host.peer.displayName == record.hostDeviceName &&
-            (host.sessionToken == record.sessionToken || host.sessionName == record.sessionName)
-        }) {
-            join(host: host)
+        // Prefer exact session token, then name + host device.
+        let host = sessionManager.discoveredHosts.first(where: { $0.sessionToken == record.sessionToken })
+            ?? sessionManager.discoveredHosts.first(where: { host in
+                host.peer.displayName == record.hostDeviceName &&
+                (host.sessionToken == record.sessionToken || host.sessionName == record.sessionName)
+            })
+
+        if let host {
+            setGuestLinkStatus(.connecting)
+            join(host: host, isReconnect: true)
             return
         }
 
@@ -2164,6 +2278,7 @@ final class SessionViewModel {
             showReconnectBanner = false
             pendingReconnectRecord = nil
             connectedHostDeviceName = initial.sessionName
+            setGuestLinkStatus(.connectedInternet)
             applyGuestPayload(initial, fromRemote: true)
             activateSessionBackgroundServices()
         }
@@ -2190,6 +2305,7 @@ final class SessionViewModel {
         guard !guestReconnectInProgress else { return }
         guestReconnectInProgress = true
         showReconnectBanner = true
+        setGuestLinkStatus(.reconnecting)
         let hostName = connectedHostDeviceName.isEmpty
             ? RecentSessionStore.records.first(where: { $0.sessionToken == payload.sessionToken })?.hostDeviceName ?? ""
             : connectedHostDeviceName
@@ -2213,14 +2329,19 @@ final class SessionViewModel {
         }
         sessionManager.startBrowsing()
         startReconnectPolling()
+        // Immediate nearby attempt — don't wait for the first backoff tick.
+        tryAutoReconnectIfPossible()
     }
 
     private func startReconnectPolling() {
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
-            for _ in 0..<72 {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let self, self.showReconnectBanner else { return }
+            // Aggressive early retries, then settle at 5s for ~3 minutes total.
+            let delays: [Double] = [1, 2, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+            for delay in delays {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                guard self.showReconnectBanner || self.guestReconnectInProgress else { return }
                 self.tryAutoReconnectIfPossible()
             }
         }
@@ -2232,6 +2353,7 @@ final class SessionViewModel {
     }
 
     private func beginHostingSession(named name: String) {
+        liveWireRevision = 0
         if payload.isRemoteBackupEnabled {
             assignRemoteJoinCredentials(forSessionName: name)
         }
@@ -2287,15 +2409,22 @@ final class SessionViewModel {
             return false
         }
 
+        // Internet join does not need Multipeer browsing.
+        sessionManager.disconnect()
+        isPracticeMode = false
+        role = .guest
+        pendingGuestPayload = nil
+        lastAppliedLiveWireRevision = 0
+        setGuestLinkStatus(.connecting)
+
         await cloudRelay.refreshAccountStatus()
 
         let attempts = max(1, maxAttempts)
         for attempt in 0..<attempts {
             if Task.isCancelled { return false }
 
-            if let initial = await cloudRelay.fetchSession(joinCode: code) {
-                isPracticeMode = false
-                role = .guest
+            if var initial = await cloudRelay.fetchSession(joinCode: code) {
+                initial.isHost = false
                 payload = initial
                 isInSession = true
                 isRemoteLinkActive = true
@@ -2305,6 +2434,7 @@ final class SessionViewModel {
                 guestReconnectInProgress = false
                 connectedHostDeviceName = initial.sessionName
                 cloudRelay.startPolling(joinCode: code)
+                setGuestLinkStatus(.connectedInternet)
                 RecentSessionStore.rememberJoin(
                     sessionName: initial.sessionName,
                     hostDeviceName: initial.sessionName,
@@ -2316,6 +2446,7 @@ final class SessionViewModel {
                 activateSessionBackgroundServices()
                 applyMetronome()
                 pushWatchUpdate(chordChanged: true)
+                objectWillChange.send()
                 #if os(iOS)
                 refreshLockScreenDisplay(force: true)
                 #endif
@@ -2332,6 +2463,8 @@ final class SessionViewModel {
             sessionManager.lastError = cloudRelay.lastError
                 ?? String(localized: "No live session found for that code. Ask the host to wait for the green checkmark on their join code.")
         }
+        role = .none
+        setGuestLinkStatus(.failed)
         return false
     }
 
@@ -2383,7 +2516,7 @@ final class SessionViewModel {
         sync()
     }
 
-    func promoteCoHost(_ peer: MCPeerID) {
+    func promoteCoHost(_ peer: PeerReference) {
         guard role == .host else { return }
         payload.coHostPeerName = peer.displayName
         sync()
@@ -2440,6 +2573,8 @@ final class SessionViewModel {
             }
         case "Ending":
             signalSongEndingIfNeeded()
+        case "Soft", "Full", "Drums out", "Build":
+            break
         default:
             break
         }
@@ -2541,10 +2676,12 @@ final class SessionViewModel {
     }
 
     func midiSetSourceConnected(id: Int32, connected: Bool) {
+        midi.start()
         midi.setSourceConnected(id: id, connected: connected)
     }
 
     func midiConnectAllSources() {
+        midi.start()
         midi.connectAllSources()
     }
 
@@ -2560,6 +2697,7 @@ final class SessionViewModel {
         role = .guest
         guestReconnectInProgress = false
         cloudRelay.clearError()
+        setGuestLinkStatus(.searching)
         sessionManager.startBrowsing()
     }
 
@@ -2569,27 +2707,72 @@ final class SessionViewModel {
         pendingReconnectRecord = nil
         guestReconnectInProgress = false
         cloudRelay.stopPolling()
+        setGuestLinkStatus(.idle)
         guard !isInSession else { return }
         sessionManager.disconnect()
         role = .none
     }
 
-    func join(host: DiscoveredHost) {
+    func join(host: DiscoveredHost, isReconnect: Bool = false) {
         isPracticeMode = false
         role = .guest
         connectedHostDeviceName = host.peer.displayName
-        sessionManager.joinHost(host)
-        guard sessionManager.lastError == nil, sessionManager.isInviting else { return }
+        pendingGuestPayload = nil
+        lastAppliedLiveWireRevision = 0
+        setGuestLinkStatus(.connecting)
+
+        if isReconnect {
+            if let token = host.sessionToken {
+                payload.sessionToken = token
+            }
+            payload.isHost = false
+        } else {
+            var seed = SessionSyncPayload.empty
+            seed.sessionName = host.sessionName
+            if let key = host.key { seed.key = key }
+            if let tempo = host.tempoBPM { seed.tempoBPM = Double(tempo) }
+            if let token = host.sessionToken { seed.sessionToken = token }
+            seed.isHost = false
+            payload = seed
+        }
+
+        // Must be true before Multipeer connects so the first host broadcast is not dropped.
         isInSession = true
-        showReconnectBanner = false
-        pendingReconnectRecord = nil
-        guestReconnectInProgress = false
+
+        sessionManager.joinHost(host)
+        if sessionManager.lastError != nil {
+            if isReconnect {
+                setGuestLinkStatus(.reconnecting)
+                return
+            }
+            isInSession = false
+            role = .none
+            setGuestLinkStatus(.failed)
+            return
+        }
+        guard sessionManager.isInviting || !sessionManager.connectedPeers.isEmpty else {
+            if isReconnect {
+                setGuestLinkStatus(.reconnecting)
+                return
+            }
+            isInSession = false
+            role = .none
+            setGuestLinkStatus(.failed)
+            return
+        }
+
+        flushPendingGuestPayloadIfNeeded()
+        if !isReconnect {
+            showReconnectBanner = false
+            pendingReconnectRecord = nil
+            guestReconnectInProgress = false
+        }
         RecentSessionStore.rememberJoin(
             sessionName: host.sessionName,
             hostDeviceName: host.peer.displayName,
-            sessionToken: host.sessionToken ?? UUID(),
-            key: host.key ?? .C,
-            remoteJoinCode: nil
+            sessionToken: host.sessionToken ?? payload.sessionToken,
+            key: host.key ?? payload.key,
+            remoteJoinCode: isReconnect ? payload.remoteJoinCode : nil
         )
         activateSessionBackgroundServices()
     }
@@ -2756,12 +2939,6 @@ final class SessionViewModel {
             payload.isCountingIn = false
             payload.countInStartEpoch = nil
         } else {
-            #if os(macOS) || os(iOS)
-            if soloAccompanimentEnabled, isSoloDrumGroovePlaying {
-                startSyncedMetronomeWithSoloDrums()
-                return
-            }
-            #endif
             let now = Date().timeIntervalSince1970
             payload.isMetronomePlaying = true
             if payload.countInBars > 0 {
@@ -2784,25 +2961,6 @@ final class SessionViewModel {
         let clamped = min(max(bpm, Self.minBPM), Self.maxBPM).rounded()
         guard clamped != payload.tempoBPM else { return }
         payload.tempoBPM = clamped
-        #if os(macOS) || os(iOS)
-        if soloAccompanimentEnabled, soloTempoLocked {
-            soloLockedBPM = clamped
-            drumAccompaniment.retimeLockedGroove(to: clamped)
-            if soloBassEnabled, autoBandMode.includesBass {
-                bassAccompaniment.stop(force: true)
-                startBassAccompanimentIfNeeded(at: clamped)
-            }
-            if payload.isMetronomePlaying {
-                alignMetronomeEpochToSoloGroove()
-                payload.isCountingIn = false
-                payload.countInStartEpoch = nil
-            }
-            applyMetronome()
-            syncHostLiveGrooveToPayload(force: true)
-            sync()
-            return
-        }
-        #endif
         if payload.isMetronomePlaying {
             let now = Date().timeIntervalSince1970
             if payload.countInBars > 0, !payload.isCountingIn {
@@ -2822,16 +2980,6 @@ final class SessionViewModel {
         guard canDriveSession else { return }
         payload.beatsPerBar = max(1, beats)
         payload.beatUnit = max(1, unit)
-        #if os(macOS) || os(iOS)
-        if soloAccompanimentEnabled, isSoloDrumGroovePlaying, payload.isMetronomePlaying {
-            alignMetronomeEpochToSoloGroove()
-            payload.isCountingIn = false
-            payload.countInStartEpoch = nil
-            applyMetronome()
-            sync()
-            return
-        }
-        #endif
         if payload.isMetronomePlaying, !payload.isCountingIn {
             payload.metronomeStartEpoch = Date().timeIntervalSince1970
         }
@@ -3078,15 +3226,6 @@ final class SessionViewModel {
         #endif
         var beatsPerBar = max(1, payload.beatsPerBar)
         var beatUnit = max(1, payload.beatUnit)
-        #if os(macOS) || os(iOS)
-        // When Solo Drums owns the grid, click must share quarter-note BPM + bar accents
-        // with the 16-step drum patterns (4 quarters), or accents drift vs the kick.
-        if soloAccompanimentEnabled, soloTempoLocked, soloDrumsMetronomeArmed || isSoloDrumGroovePlaying {
-            if let locked = soloLockedBPM { bpm = locked }
-            beatUnit = 4
-            beatsPerBar = 4
-        }
-        #endif
         metronome.apply(
             bpm: bpm,
             beatsPerBar: beatsPerBar,
@@ -3106,11 +3245,6 @@ final class SessionViewModel {
         let needsAudioEngine: Bool = {
             if displayedMetronomePlaying || payload.isCountingIn { return true }
             if backingTrack.isPlaying { return true }
-            if soloAccompanimentEnabled {
-                if drumAccompaniment.isPlaying { return true }
-                if bassAccompaniment.isPlaying { return true }
-                // Mic capture owns AVAudioSession while listening — don't fight it via metronome keep-alive.
-            }
             if role == .host { return false }
             return isInSession && isAppInBackground
         }()
@@ -3119,6 +3253,18 @@ final class SessionViewModel {
     }
 
     func leaveSession() {
+        // Flip the root UI first. Teardown used to run before `isInSession = false`,
+        // so Leave looked stuck while CloudKit/Multipeer shut down — and HomeView
+        // was not observing the view model, so the session screen never dismissed.
+        let wasHost = role == .host
+        let wasPractice = isPracticeMode
+        isInSession = false
+        role = .none
+        hostActivationPending = false
+        pendingHostStart = nil
+        hostStartTask?.cancel()
+        hostStartTask = nil
+
         transitionTask?.cancel()
         transitionTask = nil
         pianoSideEffectsTask?.cancel()
@@ -3146,14 +3292,9 @@ final class SessionViewModel {
         outboundSyncNeedsFull = false
         outboundSyncLivePending = false
         outboundSyncImmediate = false
+        pendingGuestPayload = nil
         hostKeepAliveTask?.cancel()
         hostKeepAliveTask = nil
-        hostStartTask?.cancel()
-        hostStartTask = nil
-        hostActivationPending = false
-        pendingHostStart = nil
-        groovePreviewTask?.cancel()
-        groovePreviewTask = nil
         lastSyncedLiveChordSymbol = nil
         liveWireRevision = 0
         lastAppliedLiveWireRevision = 0
@@ -3162,7 +3303,8 @@ final class SessionViewModel {
         pendingReconnectRecord = nil
         guestReconnectInProgress = false
         connectedHostDeviceName = ""
-        if role == .host, payload.isRemoteBackupEnabled {
+        setGuestLinkStatus(.idle)
+        if wasHost, payload.isRemoteBackupEnabled {
             cloudRelay.stopPublishingOnly()
         } else {
             cloudRelay.stopAll()
@@ -3174,19 +3316,13 @@ final class SessionViewModel {
         bandChatToastTask = nil
         bandChatToastText = nil
         isBandChatPresented = false
-        // Dismiss session UI before tearing down Multipeer so SwiftUI is not
-        // still observing connectedPeers while SF Symbol layers animate away.
-        isInSession = false
-        if !isPracticeMode {
+        if !wasPractice {
             sessionManager.disconnect()
         }
         clearInferredLiveProgression(resetEngine: true)
         deactivateSessionBackgroundServices()
         metronome.stop()
         backingTrack.clear()
-        #if os(macOS) || os(iOS)
-        stopSoloAccompaniment()
-        #endif
         if isPracticeMode {
             endPracticeStats()
         }
@@ -3225,6 +3361,7 @@ final class SessionViewModel {
         isAppInBackground = false
         stopBackgroundRefreshLoop()
         sessionBackground.end()
+        rescanMIDISources()
         if isInSession {
             if role == .host {
                 sessionManager.refreshHostingIfNeeded()
@@ -3249,6 +3386,9 @@ final class SessionViewModel {
         setScreenAlwaysOn(true)
         metronome.setSessionKeepAlive(false)
         refreshSessionAudioPolicy()
+        if ChordyxPreferences.showBandCuePadByDefault {
+            GuestDisplaySettings.bandCuePadVisible = true
+        }
         // Live Activity can stall the main thread if requested mid-transition.
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
@@ -3301,7 +3441,9 @@ final class SessionViewModel {
     }
     #else
     func handleAppDidEnterBackground() {}
-    func handleAppDidBecomeActive() {}
+    func handleAppDidBecomeActive() {
+        rescanMIDISources()
+    }
 
     func refreshLockScreenDisplay(force: Bool = false) {}
 
@@ -3347,6 +3489,7 @@ final class SessionViewModel {
     }
 
     private func sync() {
+        objectWillChange.send()
         outboundSyncNeedsFull = true
         outboundSyncImmediate = true
         requestOutboundSync(delayMs: 0)
@@ -3354,7 +3497,7 @@ final class SessionViewModel {
 
     private func requestOutboundSync(delayMs: UInt64? = nil) {
         if outboundSyncImmediate {
-            guard outboundSyncTask == nil else { return }
+            if outboundSyncTask != nil { return }
             outboundSyncTask = Task { [weak self] in
                 guard !Task.isCancelled, let self else { return }
                 self.flushOutboundSync()
@@ -3405,7 +3548,17 @@ final class SessionViewModel {
             let pianoNotesChanged = payload.pianoNotes != lastSyncedPianoNotes
             if payload.isRemoteBackupEnabled, let code = payload.remoteJoinCode,
                sendFull || liveChordChanged || pianoNotesChanged {
-                let debounceMs = sendFull ? 250 : (liveChordChanged || pianoNotesChanged ? 80 : 350)
+                // Chord advances stay snappy; piano floods are throttled to protect CloudKit.
+                let debounceMs: Int
+                if sendFull {
+                    debounceMs = 40
+                } else if liveChordChanged {
+                    debounceMs = 50
+                } else if pianoNotesChanged {
+                    debounceMs = 160
+                } else {
+                    debounceMs = 100
+                }
                 let cloudPayload = isLiveBurst ? payload.forHighFrequencyPeerSync() : payload
                 cloudRelay.schedulePublish(payload: cloudPayload, joinCode: code, debounceMs: debounceMs)
             }
@@ -3485,7 +3638,7 @@ extension SessionViewModel {
         payload.guestRoleAssignments[peerName]
     }
 
-    func assignGuestRole(_ guestRole: GuestViewRole, to peer: MCPeerID) {
+    func assignGuestRole(_ guestRole: GuestViewRole, to peer: PeerReference) {
         guard self.role == .host else { return }
         payload.guestRoleAssignments[peer.displayName] = guestRole
         sync()
@@ -3594,7 +3747,7 @@ extension SessionViewModel {
         sync()
     }
 
-    func requestHostHandoff(to peer: MCPeerID) {
+    func requestHostHandoff(to peer: PeerReference) {
         guard role == .host else { return }
         initiateHandoffCountdown(to: peer)
     }
@@ -3728,9 +3881,6 @@ extension SessionViewModel {
     }
 
     func handleExtendedFeatureSectionChange(to section: SectionMarker?) {
-        #if os(macOS) || os(iOS)
-        refreshSoloDrumSectionDynamics()
-        #endif
         guard canDriveSession, let section else { return }
         if lastTrackedSectionID != section.id {
             lastTrackedSectionID = section.id
@@ -3790,9 +3940,6 @@ extension SessionViewModel {
             payload.tempoDriftBPM = 0
             return
         }
-        #if os(macOS) || os(iOS)
-        if payload.hostLiveGrooveActive { return }
-        #endif
         let beatDuration = 60.0 / payload.tempoBPM
         let start = payload.metronomeStartEpoch ?? now.timeIntervalSince1970
         let elapsed = now.timeIntervalSince1970 - start
@@ -4007,7 +4154,7 @@ extension SessionViewModel {
         sync()
     }
 
-    func initiateHandoffCountdown(to peer: MCPeerID, seconds: Int = 5) {
+    func initiateHandoffCountdown(to peer: PeerReference, seconds: Int = 5) {
         guard role == .host else { return }
         payload.handoffFromPeer = SessionManager.currentDisplayName()
         payload.handoffCountdown = seconds

@@ -3,8 +3,8 @@
 //  Chordyx
 //
 
+import Combine
 import Foundation
-import Observation
 import UniformTypeIdentifiers
 
 extension UTType {
@@ -12,11 +12,10 @@ extension UTType {
     static let chordyxPack = UTType(exportedAs: "com.chordyx.pack", conformingTo: .json)
 }
 
-@Observable
 @MainActor
-final class ProgressionStore {
-    private(set) var progressions: [SavedProgression] = []
-    private(set) var setlists: [Setlist] = []
+final class ProgressionStore: ObservableObject {
+    @Published private(set) var progressions: [SavedProgression] = []
+    @Published private(set) var setlists: [Setlist] = []
 
     var iCloudBackupEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Self.iCloudKey) }
@@ -48,12 +47,13 @@ final class ProgressionStore {
         setlistFileURL = documents.appendingPathComponent("setlists.json")
         pdfDirectory = documents.appendingPathComponent("PDFCharts", isDirectory: true)
         try? FileManager.default.createDirectory(at: pdfDirectory, withIntermediateDirectories: true)
-        // Local first — ubiquity container lookup can stall the Mac main thread at launch.
-        load()
-        loadSetlists()
-        installStarterPackIfNeeded()
-        Task(priority: .utility) { [weak self] in
-            await self?.importFromCloudInBackground()
+        // Defer disk + starter pack off the critical launch path (Loading… freeze).
+        Task(priority: .userInitiated) { @MainActor [weak self] in
+            guard let self else { return }
+            self.load()
+            self.loadSetlists()
+            self.installStarterPackIfNeeded()
+            await self.importFromCloudInBackground()
         }
     }
 

@@ -4,11 +4,9 @@
 //
 
 import Foundation
-import Observation
 
 /// Internet session relay using Firebase Realtime Database REST API (no SDK required).
 @MainActor
-@Observable
 final class FirebaseSessionRelay {
     private static let sessionLifetime: TimeInterval = 8 * 60 * 60
 
@@ -19,6 +17,8 @@ final class FirebaseSessionRelay {
     private var publishTask: Task<Void, Never>?
     private var lastPublishedRevision = 0
     private var processedControlKeys: Set<String> = []
+    private var lastPolledPayloadData: Data?
+    private var idlePollStreak = 0
 
     private(set) var isAvailable = false
     private(set) var isPolling = false
@@ -51,7 +51,7 @@ final class FirebaseSessionRelay {
         }
     }
 
-    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 350) {
+    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 100) {
         guard isPublishing else { return }
         let revision = lastPublishedRevision + 1
         lastPublishedRevision = revision
@@ -110,7 +110,7 @@ final class FirebaseSessionRelay {
         _ = try? await delete(path: sessionPath(for: joinCode))
     }
 
-    func fetchSession(joinCode: String) async -> SessionSyncPayload? {
+    func fetchSession(joinCode: String, deliverOnlyIfChanged: Bool = false) async -> SessionSyncPayload? {
         let code = RemoteJoinCode.normalize(joinCode)
         guard RemoteJoinCode.isValid(code) else {
             lastError = String(localized: "Enter a 6-character join code.")
@@ -126,10 +126,15 @@ final class FirebaseSessionRelay {
                 lastError = String(localized: "That session has expired.")
                 return nil
             }
+            if deliverOnlyIfChanged, record.payloadData == lastPolledPayloadData {
+                lastError = nil
+                return nil
+            }
             guard let payload = try? JSONDecoder().decode(SessionSyncPayload.self, from: record.payloadData) else {
                 lastError = String(localized: "No live session found for that code.")
                 return nil
             }
+            lastPolledPayloadData = record.payloadData
             lastError = nil
             return payload
         } catch {
@@ -143,10 +148,25 @@ final class FirebaseSessionRelay {
         guard RemoteJoinCode.isValid(code) else { return }
         pollTask?.cancel()
         isPolling = true
+        lastPolledPayloadData = nil
+        idlePollStreak = 0
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollOnce(joinCode: code)
-                try? await Task.sleep(for: .milliseconds(200))
+                let changed = await self?.pollOnce(joinCode: code) ?? false
+                guard let self, !Task.isCancelled else { return }
+                let delayMs: UInt64
+                if changed {
+                    self.idlePollStreak = 0
+                    delayMs = 80
+                } else {
+                    self.idlePollStreak = min(self.idlePollStreak + 1, 6)
+                    switch self.idlePollStreak {
+                    case 0...1: delayMs = 110
+                    case 2...3: delayMs = 180
+                    default: delayMs = 280
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(delayMs))
             }
         }
     }
@@ -155,6 +175,8 @@ final class FirebaseSessionRelay {
         pollTask?.cancel()
         pollTask = nil
         isPolling = false
+        lastPolledPayloadData = nil
+        idlePollStreak = 0
     }
 
     func stopAll() {
@@ -180,9 +202,14 @@ final class FirebaseSessionRelay {
         _ = try? await putJSON(record, path: "controls/\(code)/\(controlID).json")
     }
 
-    private func pollOnce(joinCode: String) async {
-        guard let payload = await fetchSession(joinCode: joinCode) else { return }
+    /// Returns `true` when a newer payload was delivered to the guest.
+    @discardableResult
+    private func pollOnce(joinCode: String) async -> Bool {
+        guard let payload = await fetchSession(joinCode: joinCode, deliverOnlyIfChanged: true) else {
+            return false
+        }
         onPayloadReceived?(payload)
+        return true
     }
 
     private func ensureSessionRecord(joinCode: String, sessionToken: UUID) async {

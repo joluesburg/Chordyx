@@ -7,16 +7,14 @@
 //
 
 import Foundation
-import Observation
 
-@Observable
 @MainActor
 final class LivePerformanceAnalyzer {
     private(set) var estimatedBPM: Double?
     private(set) var tempoConfidence: Double = 0
     private(set) var detectedStyle: LiveMusicStyle = .unknown
     private(set) var styleConfidence: Double = 0
-    private(set) var suggestedPattern: DrumPattern?
+    private(set) var suggestedStyle: LiveMusicStyle?
     private(set) var syncopationIndex: Double = 0
     private(set) var averageChordComplexity: Double = 0
     private(set) var chordChangesPerMinute: Double = 0
@@ -89,7 +87,7 @@ final class LivePerformanceAnalyzer {
         tempoConfidence = 0
         detectedStyle = .unknown
         styleConfidence = 0
-        suggestedPattern = nil
+        suggestedStyle = nil
         syncopationIndex = 0
         averageChordComplexity = 0
         chordChangesPerMinute = 0
@@ -379,7 +377,7 @@ final class LivePerformanceAnalyzer {
         if recentChords.isEmpty {
             detectedStyle = .unknown
             styleConfidence = 0
-            suggestedPattern = nil
+            suggestedStyle = nil
             return
         }
 
@@ -426,11 +424,11 @@ final class LivePerformanceAnalyzer {
             if recentChords.count == 1, rhythmOnsets.count >= 4, let tempoStyle = bestTempoLedStyle(bpm: bpm, syncopation: syncopationIndex) {
                 detectedStyle = tempoStyle
                 styleConfidence = max(styleConfidence * 0.8, 0.28)
-                suggestedPattern = tempoStyle.suggestedDrumPattern
+                suggestedStyle = tempoStyle
             } else {
                 detectedStyle = .unknown
                 styleConfidence = max(0, styleConfidence - 0.08)
-                suggestedPattern = nil
+                suggestedStyle = nil
             }
             return
         }
@@ -442,7 +440,7 @@ final class LivePerformanceAnalyzer {
         if confidence > styleConfidence * 0.65 || styleConfidence < 0.22 {
             detectedStyle = best.key
             styleConfidence = max(styleConfidence * 0.85, confidence)
-            suggestedPattern = best.key.suggestedDrumPattern
+            suggestedStyle = best.key
         }
     }
 

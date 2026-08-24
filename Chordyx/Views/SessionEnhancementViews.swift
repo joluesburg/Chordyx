@@ -128,9 +128,6 @@ struct LiveSessionStatusBar: View {
     let isMetronomePlaying: Bool
     var syncQuality: SyncQuality = .unknown
     var showSyncQuality: Bool = false
-    var hostLiveGrooveActive: Bool = false
-    var hostLiveGrooveStyle: LiveMusicStyle = .unknown
-    var hostLiveGroovePhase: SoloDrumWorkflowPhase = .idle
 
     private var displayBPM: Int {
         Int(tempoBPM.rounded())
@@ -147,17 +144,10 @@ struct LiveSessionStatusBar: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(syncQuality == .poor ? .orange : AppTheme.textSecondary)
             }
-            if hostLiveGrooveActive {
-                hostGrooveChip
-            }
-            if isMetronomePlaying || (hostLiveGrooveActive && displayBPM > 0) {
+            if isMetronomePlaying {
                 Label(TempoMarking.caption(for: tempoBPM), systemImage: "metronome")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
-            } else if hostLiveGrooveActive, hostLiveGroovePhase != .playing, displayBPM > 0 {
-                Label(TempoMarking.caption(for: tempoBPM), systemImage: "waveform")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppTheme.textSecondary)
             }
             if isAutoAdvancePaused {
                 statusChip(String(localized: "HOLD"), icon: "hand.raised.fill", color: AppTheme.accentSecondary)
@@ -165,23 +155,6 @@ struct LiveSessionStatusBar: View {
             if isVampActive {
                 statusChip(String(localized: "VAMP"), icon: "infinity.circle.fill", color: AppTheme.accent)
             }
-        }
-    }
-
-    @ViewBuilder
-    private var hostGrooveChip: some View {
-        if hostLiveGrooveStyle != .unknown {
-            Label(hostLiveGrooveStyle.label, systemImage: "music.mic")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.accentSecondary)
-        } else if hostLiveGroovePhase == .listening || hostLiveGroovePhase == .awaitingConfirmation {
-            Label(String(localized: "Host listening"), systemImage: "ear")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.textSecondary)
-        } else if hostLiveGroovePhase == .playing {
-            Label(String(localized: "Live groove"), systemImage: "repeat")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.accentSecondary)
         }
     }
 
@@ -196,67 +169,10 @@ struct LiveSessionStatusBar: View {
     }
 }
 
-// MARK: - Guest host live groove (Mac → iPhone)
-
-struct GuestHostLiveGrooveBanner: View {
-    let payload: SessionSyncPayload
-
-    private var phaseLabel: String {
-        switch payload.hostLiveGroovePhase {
-        case .listening, .awaitingConfirmation:
-            String(localized: "Host is listening to your groove")
-        case .playing:
-            String(localized: "Live drum loop from host")
-        case .awaitingTempoShiftConfirmation:
-            String(localized: "Host adjusting tempo")
-        case .idle:
-            String(localized: "Live groove")
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "desktopcomputer")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AppTheme.accentSecondary)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(phaseLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.textPrimary)
-                HStack(spacing: 8) {
-                    if let bpm = payload.guestLiveGrooveDisplayBPM {
-                        Label(TempoMarking.caption(for: bpm), systemImage: "metronome")
-                    }
-                    if let genre = payload.guestGlobalGenreDisplayLabel {
-                        Label(genre, systemImage: "globe.americas.fill")
-                    } else if payload.hostLiveGrooveStyle != .unknown {
-                        Label(payload.hostLiveGrooveStyle.label, systemImage: "music.mic")
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(AppTheme.textSecondary)
-            }
-
-            Spacer(minLength: 0)
-
-            if payload.hostLiveGroovePhase == .playing {
-                Image(systemName: "repeat")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AppTheme.accent)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(AppTheme.accentSecondary.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 // MARK: - Live section jumps
 
 struct LiveSectionJumpBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     private let columns = [
         GridItem(.flexible(), spacing: 10),
@@ -320,7 +236,7 @@ struct LiveSectionJumpBar: View {
 // MARK: - Live setlist controls
 
 struct LiveSetlistControlBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     let store: ProgressionStore
 
     var body: some View {
@@ -428,7 +344,7 @@ struct BackingTrackStatusBanner: View {
 }
 
 struct BackingTrackPanel: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var onImport: () -> Void
     var style: Style = .standard
 
@@ -887,6 +803,7 @@ struct HostRemoteJoinCodeCompactChip: View {
 
 struct ReconnectBanner: View {
     let sessionName: String
+    var statusLabel: String = String(localized: "Reconnecting…")
     var onReconnect: () -> Void
     var onLeave: () -> Void
 
@@ -908,17 +825,17 @@ struct ReconnectBanner: View {
 
     private var messageBlock: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(AppTheme.accent)
+            ProgressView()
+                .tint(AppTheme.accent)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "Connection lost"))
+                Text(statusLabel)
                     .font(.subheadline.weight(.bold))
-                Text(String(format: String(localized: "Reconnect to %@"), sessionName))
+                Text(String(format: String(localized: "Reconnecting to %@"), sessionName))
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(String(localized: "Trying nearby Wi‑Fi and iCloud backup…"))
+                Text(String(localized: "Trying nearby Wi‑Fi automatically, then Internet backup…"))
                     .font(.caption2)
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -929,7 +846,7 @@ struct ReconnectBanner: View {
 
     private var actionButtons: some View {
         HStack(spacing: 10) {
-            Button(String(localized: "Reconnect"), action: onReconnect)
+            Button(String(localized: "Try now"), action: onReconnect)
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.accent)
                 .lineLimit(1)
@@ -951,28 +868,63 @@ struct ReconnectBanner: View {
 
     private var wideLayout: some View {
         HStack(spacing: 12) {
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(AppTheme.accent)
+            ProgressView()
+                .tint(AppTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "Connection lost"))
+                Text(statusLabel)
                     .font(.subheadline.weight(.bold))
-                Text(String(format: String(localized: "Reconnect to %@"), sessionName))
+                Text(String(format: String(localized: "Reconnecting to %@"), sessionName))
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
-                Text(String(localized: "Trying nearby Wi‑Fi and iCloud backup…"))
-                    .font(.caption2)
-                    .foregroundStyle(AppTheme.textSecondary)
             }
-            Spacer(minLength: 0)
-            Button(String(localized: "Reconnect"), action: onReconnect)
+            Spacer(minLength: 8)
+            Button(String(localized: "Try now"), action: onReconnect)
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.accent)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
             Button(String(localized: "Leave"), action: onLeave)
                 .font(.caption.weight(.semibold))
+        }
+    }
+}
+
+struct GuestLinkStatusChip: View {
+    let status: GuestLinkStatus
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if status == .searching || status == .connecting || status == .reconnecting {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(AppTheme.accent)
+            } else {
+                Image(systemName: status.systemImage)
+                    .font(.caption2.weight(.semibold))
+            }
+            Text(status.label)
+                .font(.caption2.weight(.semibold))
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(background, in: Capsule())
+        .accessibilityLabel(status.label)
+    }
+
+    private var foreground: Color {
+        switch status {
+        case .connectedLocal, .connectedInternet: AppTheme.background
+        case .failed: .white
+        default: AppTheme.textPrimary
+        }
+    }
+
+    private var background: Color {
+        switch status {
+        case .connectedLocal, .connectedInternet: AppTheme.accent
+        case .failed: Color.red.opacity(0.85)
+        case .reconnecting, .connecting: AppTheme.accentSecondary.opacity(0.35)
+        default: AppTheme.surfaceElevated
         }
     }
 }
@@ -1222,7 +1174,7 @@ struct ProgressionQRShareSheet: View {
 // MARK: - Pre-service checklist
 
 struct PreServiceChecklistView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var store: ProgressionStore? = nil
     var onFinish: () -> Void
 

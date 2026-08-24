@@ -9,7 +9,7 @@ import SwiftUI
 /// mistakes without cluttering the live performance screen.
 struct ProgressionEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @State private var showAddChord = false
 
     private var chords: [ChordEntry] { viewModel.sortedChords }

@@ -12,8 +12,8 @@ import CoreAudio
 #endif
 
 struct ServiceLearningMacSection: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var progressionStore: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var progressionStore: ProgressionStore
     @State private var showLibrary = false
     @State private var profileNameDraft: String = ""
 
@@ -301,8 +301,8 @@ private struct ServiceLearningRecordRow: View {
 }
 
 struct ServiceLearningLibrarySheet: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var progressionStore: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var progressionStore: ProgressionStore
     @Environment(\.dismiss) private var dismiss
 
     private var filteredRecords: [ServiceLearningRecord] {

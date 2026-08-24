@@ -45,11 +45,11 @@ private enum ImportStep {
 
 struct SongImportView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
 
     @AppStorage("lastImportMode") private var lastImportModeRaw = ImportMode.search.rawValue
-    @State private var importService = SongImportService()
+    @StateObject private var importService = SongImportService()
     @State private var mode: ImportMode = .search
     @State private var importStep: ImportStep = .source
     @State private var urlText = ""

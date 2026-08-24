@@ -104,9 +104,24 @@ struct LiveCue: Codable, Equatable, Sendable {
         ("Hold", "hand.raised.fill"),
         ("Build", "arrow.up.circle.fill"),
         ("Break", "pause.circle.fill"),
+        ("Soft", "speaker.wave.1.fill"),
+        ("Full", "speaker.wave.3.fill"),
+        ("Drums out", "drum.fill"),
         ("Repeat", "repeat.circle.fill"),
         ("Tag", "tag.fill"),
         ("Vamp", "infinity.circle.fill"),
+        ("Ending", "flag.checkered"),
+    ]
+
+    /// Compact strip over the chord ring — highest-signal stage cues.
+    static let ringPresets: [(String, String)] = [
+        ("Hold", "hand.raised.fill"),
+        ("Build", "arrow.up.circle.fill"),
+        ("Break", "pause.circle.fill"),
+        ("Soft", "speaker.wave.1.fill"),
+        ("Full", "speaker.wave.3.fill"),
+        ("Drums out", "drum.fill"),
+        ("Tag", "tag.fill"),
         ("Ending", "flag.checkered"),
     ]
 }

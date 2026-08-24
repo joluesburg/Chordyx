@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import MultipeerConnectivity
 import UniformTypeIdentifiers
 #if os(iOS)
 import UIKit
@@ -13,8 +12,8 @@ import AppKit
 #endif
 
 struct SessionView: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -32,11 +31,12 @@ struct SessionView: View {
     @AppStorage("metronomeVolume") private var metronomeVolume: Double = 0.8
     @AppStorage("metronomePanelVisible") private var metronomePanelVisible = true
     @AppStorage("guestShowLiveChordsOnRing") private var showLiveChordsOnRing = false
-    @AppStorage(GuestDisplaySettings.liveNowOnlyKey) private var guestLiveNowOnly = false
+    @AppStorage(GuestDisplaySettings.liveViewStyleKey) private var guestLiveViewStyleRaw = GuestLiveViewStyle.ring.rawValue
     @AppStorage(SessionViewModel.showInternetJoinCodeKey) private var showInternetJoinCode = false
     @AppStorage("guestMetronomeAudioEnabled") private var guestMetronomeAudioEnabled = true
     @State private var showMetadataEditor = false
     @State private var showMIDISettings = false
+    @State private var showPreferences = false
     @State private var showGuestSettings = false
     @State private var showLockScreenSettings = false
     @State private var showPDFChart = false
@@ -92,7 +92,21 @@ struct SessionView: View {
         isLivePerformance && !liveToolsExpanded
     }
 
-    /// Prefer Stage hero in Live unless the user explicitly chose Ring.
+    private var guestLiveViewStyle: GuestLiveViewStyle {
+        get { GuestLiveViewStyle(rawValue: guestLiveViewStyleRaw) ?? .ring }
+        nonmutating set { guestLiveViewStyleRaw = newValue.rawValue }
+    }
+
+    private var guestLiveViewStyleBinding: Binding<GuestLiveViewStyle> {
+        Binding(
+            get: { GuestLiveViewStyle(rawValue: guestLiveViewStyleRaw) ?? .ring },
+            set: {
+                GuestDisplaySettings.liveViewStyle = $0
+                guestLiveViewStyleRaw = $0.rawValue
+            }
+        )
+    }
+
     private var prefersLiveChordHeroDisplay: Bool {
         guard effectiveDisplayMode != .ring else { return false }
         if viewModel.payload.isLiveChordsOnly { return true }
@@ -103,7 +117,15 @@ struct SessionView: View {
     }
 
     private var usesChordRingLayout: Bool {
-        effectiveDisplayMode == .ring
+        effectiveDisplayMode == .ring && !usesChordClockLayout
+    }
+
+    /// iPhone guest watch-face dial (local preference).
+    private var usesChordClockLayout: Bool {
+        isGuest
+            && PlatformDevice.isPhone
+            && (isLivePerformance || viewModel.payload.isLiveChordsOnly)
+            && guestLiveViewStyle == .clock
     }
 
     private var isCountInActive: Bool {
@@ -121,7 +143,7 @@ struct SessionView: View {
     }
 
     private var guestShowsLiveNowOnly: Bool {
-        isGuest && isLivePerformance && guestLiveNowOnly
+        isGuest && isLivePerformance && guestLiveViewStyle == .now
     }
 
     private var shouldShowScaleHint: Bool {
@@ -233,7 +255,7 @@ struct SessionView: View {
             let fraction = bandCuePadVisible ? 0.26 : 0.16
             return min(bandCuePadVisible ? 220 : 150, viewportHeight * fraction)
         }
-        let isRingHero = usesChordRingLayout || guestShowsLiveNowOnly
+        let isRingHero = usesChordRingLayout || usesChordClockLayout || guestShowsLiveNowOnly
         #if os(macOS)
         if isGuest && isRingHero {
             return min(240, viewportHeight * 0.30)
@@ -273,7 +295,7 @@ struct SessionView: View {
     }
 
     private func maxHeaderHeight(for viewportHeight: CGFloat) -> CGFloat {
-        if usesChordRingLayout {
+        if usesChordRingLayout || usesChordClockLayout {
             return horizontalSizeClass == .regular ? 92 : 80
         }
         if prefersLiveChordHeroDisplay {
@@ -406,14 +428,7 @@ struct SessionView: View {
     }
 
     private var keyControlTitle: String {
-        let keyName = viewModel.payload.key.displayName
-        if viewModel.payload.autoDetectKey {
-            if viewModel.payload.isKeyAutoDetected {
-                return String(format: String(localized: "Key %@ · AI"), keyName)
-            }
-            return String(format: String(localized: "Key %@ · AI listening"), keyName)
-        }
-        return String(format: String(localized: "Key %@"), keyName)
+        viewModel.autoKeyControlTitle(isGuest: isGuest)
     }
 
     var body: some View {
@@ -529,7 +544,7 @@ struct SessionView: View {
     ) -> some View {
         sessionContent(stageHeight: stageHeight)
             .safeAreaInset(edge: .top, spacing: 0) {
-                if usesChordRingLayout {
+                if usesChordRingLayout || usesChordClockLayout {
                     ringModeHeader
                 } else if viewModel.payload.performanceMode == .rehearsal {
                     sessionHeader(maxHeight: headerMaxHeight)
@@ -642,6 +657,10 @@ struct SessionView: View {
 
     private func configureSessionOnAppear() {
         if isGuest {
+            // Migrate legacy Now-only bool into the Live style AppStorage key once.
+            if UserDefaults.standard.object(forKey: GuestDisplaySettings.liveViewStyleKey) == nil {
+                guestLiveViewStyleRaw = GuestDisplaySettings.liveViewStyle.rawValue
+            }
             viewModel.setGuestMetronomeAudioEnabled(guestMetronomeAudioEnabled)
             showLiveChordsOnRing = viewModel.payload.ringShowsLiveChords
         } else {
@@ -767,8 +786,7 @@ struct SessionView: View {
 
             if !isGuest,
                abs(viewModel.payload.tempoDriftBPM) > 2,
-               viewModel.payload.isMetronomePlaying,
-               !viewModel.payload.hostLiveGrooveActive {
+               viewModel.payload.isMetronomePlaying {
                 TempoDriftBanner(driftBPM: viewModel.payload.tempoDriftBPM)
             }
 
@@ -870,15 +888,22 @@ struct SessionView: View {
 
     @ViewBuilder
     private var reconnectOverlayContent: some View {
-        if viewModel.showReconnectBanner, isGuest {
+        if isGuest, viewModel.showReconnectBanner || viewModel.guestLinkStatus == .reconnecting {
             ReconnectBanner(
                 sessionName: viewModel.payload.sessionName,
+                statusLabel: viewModel.guestLinkStatus.label,
                 onReconnect: { viewModel.tryAutoReconnectIfPossible() },
                 onLeave: { showLeaveConfirmation = true }
             )
             .padding(.horizontal, sessionHorizontalPadding)
             .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .top)
+        } else if isGuest, viewModel.guestLinkStatus != .idle {
+            GuestLinkStatusChip(status: viewModel.guestLinkStatus)
+                .padding(.horizontal, sessionHorizontalPadding)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .allowsHitTesting(false)
         }
     }
 
@@ -895,6 +920,9 @@ struct SessionView: View {
         sessionWithOverlays
             .platformSheet(isPresented: $showMIDISettings) {
                 MIDISettingsView(viewModel: viewModel)
+            }
+            .platformSheet(isPresented: $showPreferences) {
+                PreferencesHubView(viewModel: viewModel)
             }
             .platformSheet(isPresented: $showGuestSettings, onDismiss: {
                 if isGuest {
@@ -1186,7 +1214,17 @@ struct SessionView: View {
                     .padding(.top, 4)
                 }
 
-                if usesChordRingLayout {
+                if usesChordClockLayout {
+                    ChordClockView(
+                        viewModel: viewModel,
+                        isGuest: isGuest,
+                        chords: ringChords,
+                        guestTranspose: guestTranspose,
+                        guestCapo: guestCapo
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                } else if usesChordRingLayout {
                     chordRingContent()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
@@ -1292,6 +1330,7 @@ struct SessionView: View {
             || showMetadataEditor
             || showSaveDialog
             || showMIDISettings
+            || showPreferences
             || showProgressionEditor
             || showPreServiceChecklist
             || showExtendedFeaturesHub
@@ -1438,21 +1477,32 @@ struct SessionView: View {
                             && centerChord == nil
                             && (isHost ? !viewModel.payload.pianoNotes.isEmpty : hostSharingPiano),
                         preferInstantActiveChanges: isHost && (!viewModel.midiSources.isEmpty || viewModel.isHostPianoLive),
-                        diameter: layout.centerDiameter
+                        diameter: layout.centerDiameter,
+                        keyCaption: viewModel.isAutoKeyStillListening
+                            ? String(localized: "Detecting key…")
+                            : String(
+                                format: String(localized: "Key of %@"),
+                                viewModel.displayNotation(isGuest: isGuest).cycleGlyph(for: viewModel.payload.key)
+                            )
                     )
                     .frame(width: layout.centerDiameter, height: layout.centerDiameter)
                     .clipped()
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }
                 .overlay(alignment: .bottom) {
-                    if !showsLiveHostTransportDeck {
-                        ringStatusBadge
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .padding(.horizontal, sessionHorizontalPadding)
-                            .padding(.bottom, 8)
+                    VStack(spacing: 8) {
+                        if !showsLiveHostTransportDeck {
+                            ringStatusBadge
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        if ChordyxPreferences.showRingCues, isHost || viewModel.payload.activeCue != nil {
+                            RingCueStrip(viewModel: viewModel, isHost: isHost)
+                        }
                     }
+                    .padding(.horizontal, sessionHorizontalPadding)
+                    .padding(.bottom, 8)
                 }
             }
         }
@@ -1498,24 +1548,31 @@ struct SessionView: View {
     private func guestLiveViewStyleControls(includeRingSource: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                GuestLiveViewStylePicker(nowOnly: $guestLiveNowOnly)
+                GuestLiveViewStylePicker(style: guestLiveViewStyleBinding)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 guestPianoKeysHeaderButton
             }
 
-            Text(
-                guestLiveNowOnly
-                    ? String(localized: "Following the host's current chord — no ring.")
-                    : String(localized: "Ring shows the full progression. Now shows only the chord being played.")
-            )
-            .font(.caption2)
-            .foregroundStyle(AppTheme.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+            Text(guestLiveViewStyleCaption)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if includeRingSource, !guestLiveNowOnly {
+            if includeRingSource, guestLiveViewStyle == .ring {
                 RingSourcePicker(showsLiveChords: ringSourceBinding)
             }
+        }
+    }
+
+    private var guestLiveViewStyleCaption: String {
+        switch guestLiveViewStyle {
+        case .now:
+            String(localized: "Following the host's current chord — no ring.")
+        case .clock:
+            String(localized: "Watch-face dial: beats on the rim, progression around, current chord in the center.")
+        case .ring:
+            String(localized: "Ring shows the full progression. Now shows only the chord being played.")
         }
     }
 
@@ -1572,15 +1629,7 @@ struct SessionView: View {
                             )
                         }
                         Text("·")
-                        if viewModel.payload.autoDetectKey {
-                            if viewModel.payload.isKeyAutoDetected {
-                                Text(String(format: String(localized: "Key of %@ · AI"), viewModel.payload.key.displayName))
-                            } else {
-                                Text(String(format: String(localized: "Key of %@ · AI listening"), viewModel.payload.key.displayName))
-                            }
-                        } else {
-                            Text(String(format: String(localized: "Key of %@"), viewModel.payload.key.displayName))
-                        }
+                        Text(viewModel.autoKeyHeadline(isGuest: isGuest))
                     }
                     .font(.caption.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
@@ -1594,10 +1643,6 @@ struct SessionView: View {
 
             if isGuest {
                 guestLiveSessionStatusBar
-            }
-
-            if isGuest && viewModel.payload.hostLiveGrooveActive {
-                GuestHostLiveGrooveBanner(payload: viewModel.payload)
             }
 
             if isGuest && isLivePerformance {
@@ -1653,10 +1698,7 @@ struct SessionView: View {
             tempoBPM: guestDisplayTempoBPM,
             isMetronomePlaying: guestDisplayMetronomePlaying,
             syncQuality: viewModel.effectiveSyncQuality,
-            showSyncQuality: true,
-            hostLiveGrooveActive: viewModel.payload.hostLiveGrooveActive,
-            hostLiveGrooveStyle: viewModel.payload.hostLiveGrooveStyle,
-            hostLiveGroovePhase: viewModel.payload.hostLiveGroovePhase
+            showSyncQuality: true
         )
     }
 
@@ -1688,10 +1730,6 @@ struct SessionView: View {
                     guestPianoKeysIconButton
                 }
                 leaveSessionButton(style: .header)
-            }
-
-            if isGuest && viewModel.payload.hostLiveGrooveActive {
-                GuestHostLiveGrooveBanner(payload: viewModel.payload)
             }
 
             if isGuest && isLivePerformance {
@@ -1872,12 +1910,6 @@ struct SessionView: View {
                 }
             }
 
-            #if os(macOS) || os(iOS)
-            if viewModel.soloAccompanimentAvailable {
-                SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
-            }
-            #endif
-
             wideLiveBandCueSection
 
             liveCompactIconToolbar
@@ -1925,13 +1957,6 @@ struct SessionView: View {
                 }, style: .compact)
                 .padding(.horizontal, sessionHorizontalPadding)
             }
-
-            #if os(macOS) || os(iOS)
-            if viewModel.soloAccompanimentAvailable {
-                SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
-                    .padding(.horizontal, sessionHorizontalPadding)
-            }
-            #endif
         }
         .padding(.bottom, 4)
     }
@@ -2129,7 +2154,7 @@ struct SessionView: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.accentSecondary)
                         .padding(.top, 4)
-                } else if isGuest, let hostName = viewModel.sessionManager.connectedPeers.first?.displayName {
+                } else if isGuest, let hostName = viewModel.sessionManager.connectedPeerReferences.first?.displayName {
                     Label("Connected to \(hostName)", systemImage: "star.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.textSecondary)
@@ -2274,7 +2299,7 @@ struct SessionView: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(viewModel.sessionManager.connectedPeers, id: \.displayName) { peer in
+                            ForEach(viewModel.sessionManager.connectedPeerReferences) { peer in
                                 musicianChip(name: peer.displayName)
                             }
                         }
@@ -2767,6 +2792,12 @@ struct SessionView: View {
                 }
 
                 Button {
+                    showPreferences = true
+                } label: {
+                    controlChip(icon: "gearshape.fill", title: String(localized: "Prefs"), fillWidth: true)
+                }
+
+                Button {
                     showMIDISettings = true
                 } label: {
                     controlChip(icon: "cable.connector", title: "MIDI", fillWidth: true)
@@ -2854,6 +2885,16 @@ struct SessionView: View {
                 }
                 .buttonStyle(.bordered)
                 #endif
+
+                Button {
+                    showPreferences = true
+                } label: {
+                    Label(String(localized: "Prefs"), systemImage: "gearshape.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
 
                 Button {
                     showGuestSettings = true

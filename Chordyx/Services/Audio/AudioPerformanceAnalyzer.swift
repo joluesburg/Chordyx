@@ -8,16 +8,14 @@
 #if os(macOS) || os(iOS)
 import AVFoundation
 import Foundation
-import Observation
 
-@Observable
 @MainActor
 final class AudioPerformanceAnalyzer {
     private(set) var estimatedBPM: Double?
     private(set) var tempoConfidence: Double = 0
     private(set) var detectedStyle: LiveMusicStyle = .unknown
     private(set) var styleConfidence: Double = 0
-    private(set) var suggestedPattern: DrumPattern?
+    private(set) var suggestedStyle: LiveMusicStyle?
     private(set) var syncopationIndex: Double = 0
     private(set) var onsetDensityPerSecond: Double = 0
     private(set) var latinRhythmAnalysis: LatinRhythmAnalysis = .empty
@@ -32,7 +30,13 @@ final class AudioPerformanceAnalyzer {
     private(set) var audioKeyConfidence: Double = 0
     private(set) var audioKeyScores: [MusicalKey: Double] = [:]
 
-    private let capture = AudioInputCapture()
+    private var captureStorage: AudioInputCapture?
+    private var capture: AudioInputCapture {
+        if let captureStorage { return captureStorage }
+        let created = AudioInputCapture()
+        captureStorage = created
+        return created
+    }
     private nonisolated let featureExtractor = AudioFeatureExtractor()
     private nonisolated let beatTracker = AudioBeatTracker()
     private nonisolated let chromaKeyEstimator = AudioChromaKeyEstimator()
@@ -81,14 +85,7 @@ final class AudioPerformanceAnalyzer {
 
     #if os(iOS)
     private static func requestMicrophonePermission() async -> Bool {
-        if #available(iOS 17.0, *) {
-            return await AVAudioApplication.requestRecordPermission()
-        }
-        return await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        await AVAudioApplication.requestRecordPermission()
     }
     #endif
 
@@ -107,7 +104,7 @@ final class AudioPerformanceAnalyzer {
         tempoConfidence = 0
         detectedStyle = .unknown
         styleConfidence = 0
-        suggestedPattern = nil
+        suggestedStyle = nil
         syncopationIndex = 0
         onsetDensityPerSecond = 0
         isTracking = false
@@ -217,7 +214,7 @@ final class AudioPerformanceAnalyzer {
         if blendedConfidence > styleConfidence * 0.65 || styleConfidence < 0.2 {
             detectedStyle = blendedStyle
             styleConfidence = blendedConfidence
-            suggestedPattern = blendedStyle.suggestedDrumPattern
+            suggestedStyle = blendedStyle == .unknown ? nil : blendedStyle
         }
     }
 }

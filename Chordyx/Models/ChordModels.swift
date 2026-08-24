@@ -423,12 +423,10 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     var broadcastSilentNudge: SilentNudgeKind?
     var silentNudgeSequence: Int = 0
     /// Mac host: live groove (solo drums) is enabled — guests show tempo & genre.
+    /// Kept for decode compatibility; no longer written by the host.
     var hostLiveGrooveActive: Bool = false
-    /// Detected or locked BPM from the host's piano analysis.
     var hostLiveGrooveBPM: Double?
-    /// `LiveMusicStyle.rawValue` for guest genre display.
     var hostLiveGrooveStyleRaw: String?
-    /// `SoloDrumWorkflowPhase.rawValue` for guest status.
     var hostLiveGroovePhaseRaw: String?
     /// Worldwide genre id from `GlobalMusicGenreCatalog` (guest display).
     var hostGlobalGenreID: String?
@@ -437,7 +435,7 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     /// `GlobalMusicRegion.rawValue` for guest region badge.
     var hostGlobalGenreRegionRaw: String?
 
-    /// `SoloDrumInstrumentCategory.rawValue` for guest / sync display.
+    /// Kept for decode compatibility; no longer written by the host.
     var hostSoloInstrumentCategoryRaw: String?
 
     static let empty = SessionSyncPayload(
@@ -505,14 +503,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     }
 
     func hostLiveGrooveGuestSignature() -> String {
-        [
-            hostLiveGrooveActive ? "1" : "0",
-            hostLiveGroovePhaseRaw ?? "",
-            hostLiveGrooveStyleRaw ?? "",
-            hostLiveGrooveBPM.map { String(format: "%.1f", $0) } ?? "",
-            hostGlobalGenreID ?? "",
-            hostGlobalGenreLabel ?? ""
-        ].joined(separator: "|")
+        // Legacy field; host no longer publishes live-groove state.
+        "0|||||"
     }
 
     func metronomeSyncSignature() -> MetronomeSyncSignature {
@@ -529,21 +521,31 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         )
     }
 
+    /// Live-only fields that `applyingLiveBurst` is allowed to update.
+    /// Anything else changing must take the full-merge path so guests never keep stale chart/UI state.
+    private func withLiveChordFieldsNormalized() -> SessionSyncPayload {
+        var copy = self
+        copy.pianoNotes = []
+        copy.liveChordSymbol = nil
+        copy.freestyleChordSymbols = []
+        copy.liveRingUsageCounts = [:]
+        copy.liveRingRecentOrder = []
+        copy.liveRingCanonicalSymbols = [:]
+        copy.liveRingSegments = []
+        copy.key = .C
+        copy.isKeyAutoDetected = false
+        copy.beatsOnActiveChord = 0
+        copy.isPianoActive = false
+        copy.hasInferredLiveProgression = false
+        // Host always sends isHost=true; guests must not treat that as a structural change.
+        copy.isHost = false
+        return copy
+    }
+
     /// True when only live piano / chord fields changed — avoids full payload replacement on guests.
     func isLiveChordBurst(comparedTo prior: SessionSyncPayload) -> Bool {
         sessionToken == prior.sessionToken
-            && chords == prior.chords
-            && activeChordID == prior.activeChordID
-            && hasInferredLiveProgression == prior.hasInferredLiveProgression
-            && activeCue?.sentAt == prior.activeCue?.sentAt
-            && metronomeSyncSignature() == prior.metronomeSyncSignature()
-            && silentNudgeSequence == prior.silentNudgeSequence
-            && guestRoleAssignments == prior.guestRoleAssignments
-            && pendingHostHandoffPeer == prior.pendingHostHandoffPeer
-            && coHostPeerName == prior.coHostPeerName
-            // Chat / quick messages must take the full-merge path, not live-burst merge.
-            && bandChatMessages == prior.bandChatMessages
-            && quickMessages == prior.quickMessages
+            && withLiveChordFieldsNormalized() == prior.withLiveChordFieldsNormalized()
     }
 
     func applyingLiveBurst(from received: SessionSyncPayload) -> SessionSyncPayload {
@@ -1099,6 +1101,8 @@ enum ChordRecognizer {
         }
 
         // Second pass tolerates a missing fifth, which is common in real voicings.
+        // Never match a 7th-without-5th on a 3-note cluster unless the bass is that root
+        // (D–E–G with bass D is not Em7 missing B — it poisoned Auto-key as E/Mi).
         for omitFifth in [false, true] {
             for root in roots {
                 let relative = Set(pcs.map { (($0 - root) % 12 + 12) % 12 })
@@ -1106,6 +1110,7 @@ enum ChordRecognizer {
                     var target = quality.intervals
                     if omitFifth {
                         guard target.count >= 4, target.contains(7) else { continue }
+                        if pcs.count < 4, bassPitchClass != root { continue }
                         target.remove(7)
                     }
                     if relative == target {

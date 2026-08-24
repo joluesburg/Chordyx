@@ -5,22 +5,30 @@
 
 import CloudKit
 import Foundation
-import Observation
 
 /// Publishes and subscribes to live session state through CloudKit when local Wi‑Fi is unavailable.
 @MainActor
-@Observable
 final class CloudKitSessionRelay {
     static let containerIdentifier = "iCloud.Espinosa.Chordyx"
     private static let sessionRecordType = "ChordyxLiveSession"
     private static let controlRecordType = "ChordyxControlRequest"
     private static let sessionLifetime: TimeInterval = 8 * 60 * 60
 
-    private let container: CKContainer
+    /// Lazily created — CKContainer during SessionViewModel init froze iPhone Loading….
+    private var containerStorage: CKContainer?
+    private var container: CKContainer {
+        if let containerStorage { return containerStorage }
+        let created = CKContainer(identifier: Self.containerIdentifier)
+        containerStorage = created
+        return created
+    }
     private var pollTask: Task<Void, Never>?
     private var controlPollTask: Task<Void, Never>?
     private var publishTask: Task<Void, Never>?
     private var lastPublishedRevision = 0
+    /// Skip identical cloud payloads so guests don't re-apply the same state every poll.
+    private var lastPolledPayloadData: Data?
+    private var idlePollStreak = 0
 
     private(set) var isAvailable = false
     private(set) var isPolling = false
@@ -33,9 +41,7 @@ final class CloudKitSessionRelay {
     var onPayloadReceived: ((SessionSyncPayload) -> Void)?
     var onControlRequest: ((SessionControlAction, String) -> Void)?
 
-    init() {
-        container = CKContainer(identifier: Self.containerIdentifier)
-    }
+    init() {}
 
     func clearError() {
         lastError = nil
@@ -64,7 +70,7 @@ final class CloudKitSessionRelay {
         }
     }
 
-    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 350) {
+    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 100) {
         guard isPublishing else { return }
         let revision = lastPublishedRevision + 1
         lastPublishedRevision = revision
@@ -141,7 +147,7 @@ final class CloudKitSessionRelay {
         }
     }
 
-    func fetchSession(joinCode: String) async -> SessionSyncPayload? {
+    func fetchSession(joinCode: String, deliverOnlyIfChanged: Bool = false) async -> SessionSyncPayload? {
         await refreshAccountStatus()
         guard isAvailable else { return nil }
         let code = RemoteJoinCode.normalize(joinCode)
@@ -165,11 +171,17 @@ final class CloudKitSessionRelay {
                 return nil
             }
 
+            if deliverOnlyIfChanged, data == lastPolledPayloadData {
+                lastError = nil
+                return nil
+            }
+
             guard let payload = try? JSONDecoder().decode(SessionSyncPayload.self, from: data) else {
                 lastError = String(localized: "Could not read session data. Ask the host to restart the session.")
                 return nil
             }
 
+            lastPolledPayloadData = data
             lastError = nil
             return payload
         } catch let error as CKError where error.code == .unknownItem {
@@ -186,10 +198,27 @@ final class CloudKitSessionRelay {
         guard RemoteJoinCode.isValid(code) else { return }
         pollTask?.cancel()
         isPolling = true
+        lastPolledPayloadData = nil
+        idlePollStreak = 0
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollOnce(joinCode: code)
-                try? await Task.sleep(for: .milliseconds(200))
+                let changed = await self?.pollOnce(joinCode: code) ?? false
+                guard let self, !Task.isCancelled else { return }
+                let delayMs: UInt64
+                if changed {
+                    self.idlePollStreak = 0
+                    // Hot path after a chord change — check again quickly.
+                    delayMs = 80
+                } else {
+                    self.idlePollStreak = min(self.idlePollStreak + 1, 6)
+                    // Back off while idle so a full band doesn't hammer CloudKit.
+                    switch self.idlePollStreak {
+                    case 0...1: delayMs = 110
+                    case 2...3: delayMs = 180
+                    default: delayMs = 280
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(delayMs))
             }
         }
     }
@@ -198,6 +227,8 @@ final class CloudKitSessionRelay {
         pollTask?.cancel()
         pollTask = nil
         isPolling = false
+        lastPolledPayloadData = nil
+        idlePollStreak = 0
     }
 
     func stopAll() {
@@ -222,9 +253,14 @@ final class CloudKitSessionRelay {
         _ = try? await saveRecord(record)
     }
 
-    private func pollOnce(joinCode: String) async {
-        guard let payload = await fetchSession(joinCode: joinCode) else { return }
+    /// Returns `true` when a newer payload was delivered to the guest.
+    @discardableResult
+    private func pollOnce(joinCode: String) async -> Bool {
+        guard let payload = await fetchSession(joinCode: joinCode, deliverOnlyIfChanged: true) else {
+            return false
+        }
         onPayloadReceived?(payload)
+        return true
     }
 
     private func ensureSessionRecord(joinCode: String, sessionToken: UUID) async {

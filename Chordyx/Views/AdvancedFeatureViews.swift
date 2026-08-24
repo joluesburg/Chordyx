@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import MultipeerConnectivity
 
 // MARK: - Chord presence strip
 
@@ -52,7 +51,7 @@ private extension MusicianInstrument {
 // MARK: - Silent nudge pad
 
 struct SilentNudgePad: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -78,7 +77,7 @@ struct SilentNudgePad: View {
 // MARK: - Tempo ramp control
 
 struct TempoRampControl: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @State private var targetBPM: Double = 80
     @State private var bars: Double = 4
 
@@ -121,7 +120,7 @@ struct TempoRampControl: View {
 // MARK: - Click track lanes
 
 struct ClickTrackLanePicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     let peerName: String
 
     var body: some View {
@@ -238,7 +237,7 @@ struct VocalRangeBanner: View {
 // MARK: - Congregation display
 
 struct CongregationDisplayView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     private var simpleChords: [String] {
         let symbols = viewModel.sortedChords.map(\.symbolName)
@@ -374,9 +373,9 @@ struct PracticeQueueView: View {
 // MARK: - Arrangement variants
 
 struct ArrangementVariantsSheet: View {
-    @Bindable var store: ProgressionStore
+    @ObservedObject var store: ProgressionStore
     let progressionID: UUID
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var newVariantName = ""
 
@@ -538,12 +537,12 @@ struct TeamPackSubscriptionsView: View {
 // MARK: - Chart delivery modes
 
 struct ChartDeliveryAssignmentView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            List(viewModel.sessionManager.connectedPeers, id: \.self) { peer in
+            List(viewModel.sessionManager.connectedPeerReferences) { peer in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(peer.displayName).font(.headline)
                     Picker(String(localized: "Chart view"), selection: binding(for: peer.displayName)) {
@@ -578,7 +577,7 @@ struct ChartDeliveryAssignmentView: View {
 // MARK: - Stage layout presets
 
 struct StageLayoutPresetsView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var presets: [StageLayoutPreset] = []
 
@@ -612,8 +611,8 @@ struct StageLayoutPresetsView: View {
 // MARK: - Sunday folder
 
 struct SundayFolderView: View {
-    @Bindable var store: ProgressionStore
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var entries: [SundayFolderEntry] = []
 
@@ -667,7 +666,7 @@ struct SundayFolderView: View {
 
 struct WeeklyDigestView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @State private var digest: TeamDigestEntry?
 
     var body: some View {
@@ -762,8 +761,8 @@ struct CarPlayRehearsalView: View {
 // MARK: - Advanced features hub (expanded)
 
 struct AdvancedFeaturesHubView: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var showPracticeQueue = false

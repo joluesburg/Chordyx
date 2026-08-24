@@ -7,8 +7,8 @@ import SwiftUI
 
 struct SetlistEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var store: ProgressionStore
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
 
     @State private var name = ""
     @State private var selectedIDs: [UUID] = []
@@ -94,8 +94,8 @@ struct SetlistEditorView: View {
 
 struct SetlistPickerView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var store: ProgressionStore
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
     @State private var showEditor = false
 
     var body: some View {

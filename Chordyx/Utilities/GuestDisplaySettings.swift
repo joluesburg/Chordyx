@@ -5,6 +5,31 @@
 
 import SwiftUI
 
+/// Guest Live view style — local preference (not synced by the host).
+enum GuestLiveViewStyle: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case ring
+    case now
+    case clock
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .ring: String(localized: "Ring")
+        case .now: String(localized: "Now")
+        case .clock: String(localized: "Clock")
+        }
+    }
+
+    /// Styles shown in the Live picker. Clock is iPhone-only.
+    static var pickerCases: [GuestLiveViewStyle] {
+        #if os(iOS)
+        if PlatformDevice.isPhone { return [.ring, .now, .clock] }
+        #endif
+        return [.ring, .now]
+    }
+}
+
 enum GuestDisplaySettings {
     static let transposeKey = "guestTransposeSemitones"
     static let capoKey = "guestCapoFret"
@@ -18,6 +43,7 @@ enum GuestDisplaySettings {
     static let acousticRoomModeKey = "guestAcousticRoomMode"
     static let stageMonitorKey = "guestStageMonitorMode"
     static let liveNowOnlyKey = "guestLiveNowOnlyMode"
+    static let liveViewStyleKey = "guestLiveViewStyle"
     static let beginnerPianoTriadsKey = "guestBeginnerPianoTriads"
     static let pianoKeysLayoutModeKey = "pianoKeysLayoutMode"
     static let externalDisplayGuideKey = "externalDisplayGuideDismissed"
@@ -201,10 +227,33 @@ enum GuestDisplaySettings {
         set { UserDefaults.standard.set(newValue, forKey: stageMonitorKey) }
     }
 
+    /// Guest Live view: Ring / Now / Clock (Clock is iPhone-oriented).
+    static var liveViewStyle: GuestLiveViewStyle {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: liveViewStyleKey),
+               let style = GuestLiveViewStyle(rawValue: raw) {
+                return style
+            }
+            // Migrate legacy bool.
+            return UserDefaults.standard.bool(forKey: liveNowOnlyKey) ? .now : .ring
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: liveViewStyleKey)
+            UserDefaults.standard.set(newValue == .now, forKey: liveNowOnlyKey)
+        }
+    }
+
     /// Guest-only: during Live sessions, show the current chord full-screen (no ring).
+    /// Kept for older call sites; backed by `liveViewStyle`.
     static var liveNowOnlyMode: Bool {
-        get { UserDefaults.standard.bool(forKey: liveNowOnlyKey) }
-        set { UserDefaults.standard.set(newValue, forKey: liveNowOnlyKey) }
+        get { liveViewStyle == .now }
+        set {
+            if newValue {
+                liveViewStyle = .now
+            } else if liveViewStyle == .now {
+                liveViewStyle = .ring
+            }
+        }
     }
 
     /// Guest-only piano: show major/minor triads instead of full host voicings (e.g. Cmaj9 → C–E–G).
@@ -280,9 +329,9 @@ enum GuestDisplaySettings {
     ) -> SessionDisplayMode {
         guard isGuest else { return hostMode }
         if stageMonitorMode { return .stage }
-        // Guest Live picker: Now = current chord (stage), Ring = full chord ring.
+        // Guest Live picker: Now = stage hero; Ring / Clock = ring layout (Clock branches in SessionView).
         if isLivePerformance || isLiveChordsOnly {
-            return liveNowOnlyMode ? .stage : .ring
+            return liveViewStyle == .now ? .stage : .ring
         }
         if let preferred = viewRole.preferredDisplayMode { return preferred }
         switch instrument {

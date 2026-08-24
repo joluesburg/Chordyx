@@ -92,20 +92,6 @@ struct LiveKeyIntelligenceTests {
     }
 }
 
-struct SoloAccompanimentHostAvailabilityTests {
-
-    @Test func soloHostGateMatchesPlatformPolicy() {
-        #if os(macOS)
-        #expect(PlatformDevice.canHostSoloAccompaniment)
-        #elseif os(iOS)
-        #expect(PlatformDevice.canHostSoloAccompaniment == PlatformDevice.isPad)
-        #expect(PlatformDevice.isPhone != PlatformDevice.canHostSoloAccompaniment || !PlatformDevice.isPhone)
-        #else
-        #expect(!PlatformDevice.canHostSoloAccompaniment)
-        #endif
-    }
-}
-
 #if os(macOS) || os(iOS)
 struct AudioChromaKeyEstimatorTests {
 
@@ -491,6 +477,57 @@ struct BandChatSyncTests {
 
         #expect(!next.isLiveChordBurst(comparedTo: prior))
     }
+
+    @Test func notationChangeIsNotTreatedAsLiveBurst() {
+        var prior = SessionSyncPayload.empty
+        prior.sessionToken = UUID()
+        prior.chords = [ChordEntry(symbolName: "C", latinName: "Do", order: 0)]
+        prior.notation = .symbol
+
+        var next = prior
+        next.notation = .latin
+        next.liveChordSymbol = "Am"
+
+        #expect(!next.isLiveChordBurst(comparedTo: prior))
+    }
+
+    @Test func activeChordChangeIsNotTreatedAsLiveBurst() {
+        let chordA = ChordEntry(symbolName: "C", latinName: "Do", order: 0)
+        let chordB = ChordEntry(symbolName: "G", latinName: "Sol", order: 1)
+        var prior = SessionSyncPayload.empty
+        prior.sessionToken = UUID()
+        prior.chords = [chordA, chordB]
+        prior.activeChordID = chordA.id
+
+        var next = prior
+        next.activeChordID = chordB.id
+        next.pianoNotes = [60, 64, 67]
+
+        #expect(!next.isLiveChordBurst(comparedTo: prior))
+    }
+
+    @Test func pianoOnlyChangeIsLiveBurst() {
+        var prior = SessionSyncPayload.empty
+        prior.sessionToken = UUID()
+        prior.chords = [ChordEntry(symbolName: "C", latinName: "Do", order: 0)]
+        prior.activeChordID = prior.chords[0].id
+
+        var next = prior
+        next.liveChordSymbol = "C"
+        next.pianoNotes = [60, 64, 67]
+        next.isPianoActive = true
+
+        #expect(next.isLiveChordBurst(comparedTo: prior))
+    }
+
+    @Test func joinQRDeepLinkRoundTrips() {
+        let code = "BCDFGH"
+        let url = SessionJoinQR.deepLink(for: code)
+        #expect(url != nil)
+        #expect(SessionJoinQR.parseCode(from: url!) == code)
+        #expect(SessionJoinQR.parseScannedValue(url!.absoluteString) == code)
+        #expect(SessionJoinQR.parseScannedValue("bcd-fgh") == code)
+    }
 }
 
 struct ChromaticToneNamesTests {
@@ -596,7 +633,7 @@ struct MetronomeDrumPhaseLockTests {
                 secondsPerBeat: spb
             )
             let stepInBar = absoluteStep % 16
-            #expect(DrumMetronomeSyncMath.isQuarterStep(stepInBar))
+            #expect(stepInBar % 4 == 0)
             #expect(MetronomePhaseMath.beatInBar(absoluteBeat: beat, beatsPerBar: 4) == stepInBar / 4)
             if stepInBar == 0 {
                 #expect(
@@ -612,6 +649,7 @@ struct MetronomeDrumPhaseLockTests {
     }
 }
 
+#if false
 struct DrumMetronomeClickThroughTests {
 
     @Test func quartersAndDownbeatsAlignForClickThrough() {
@@ -637,4 +675,158 @@ struct DrumMetronomeClickThroughTests {
         #expect(!DrumMetronomeSyncMath.shouldZeroGrooveDelay(clickThrough: false, stepInBar: 0))
     }
 }
+#endif
+
+// MARK: - Auto-key live path (same gates as SessionViewModel.maybeAutoDetectKey)
+
+@MainActor
+struct AutoKeyLivePathTests {
+
+    private func decide(
+        symbols: [String],
+        currentKey: MusicalKey = .C,
+        isKeyAutoDetected: Bool = false,
+        lockedConfidence: Double = 0,
+        pendingKey: MusicalKey? = nil,
+        pendingHits: Int = 0,
+        forcePeriodicReview: Bool = false,
+        armedAt: TimeInterval = 0,
+        now: TimeInterval = 10,
+        detect: @escaping ([String], String?) -> AdaptiveKeyDetection?
+    ) -> SessionViewModel.AutoKeyCommitDecision? {
+        SessionViewModel.evaluateAutoKeyCommit(
+            symbols: symbols,
+            currentKey: currentKey,
+            isKeyAutoDetected: isKeyAutoDetected,
+            lockedConfidence: lockedConfidence,
+            pendingKey: pendingKey,
+            pendingHits: pendingHits,
+            forcePeriodicReview: forcePeriodicReview,
+            sessionName: nil,
+            armedAt: armedAt,
+            now: now,
+            detect: detect
+        )
+    }
+
+    private func stub(
+        _ key: MusicalKey,
+        confidence: Double,
+        source: AdaptiveKeyDetection.Source = .ensemble
+    ) -> ([String], String?) -> AdaptiveKeyDetection? {
+        { _, _ in AdaptiveKeyDetection(key: key, confidence: confidence, source: source) }
+    }
+
+    @Test func singleNoteDoesNotAnnounceKey() {
+        let decision = decide(symbols: ["E"], detect: stub(.E, confidence: 0.99))
+        #expect(decision == nil)
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(["E"]))
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(["D", "E"]))
+    }
+
+    @Test func scaleFragmentEm7FGDoesNotUnlockAutoKey() {
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(["Em7", "F", "G"]))
+        let decision = decide(symbols: ["Em7", "F", "G"], detect: stub(.E, confidence: 0.99))
+        #expect(decision == nil)
+    }
+
+    @Test func powerChordsAloneDoNotUnlockAutoKey() {
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(["D5", "E5", "F5", "G5"]))
+        let decision = decide(symbols: ["D5", "A5", "D5", "A5"], detect: stub(.D, confidence: 0.9))
+        #expect(decision == nil)
+    }
+
+    @Test func vetoesEAgainstDMinorProgression() {
+        let symbols = ["Dm", "Gm", "A", "Dm"]
+        #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
+        let decision = decide(symbols: symbols, detect: stub(.E, confidence: 0.95, source: .memory))
+        #expect(decision == nil)
+    }
+
+    @Test func dMinorProgressionCommitsDNotE() {
+        let symbols = ["Dm", "Gm", "A", "Dm"]
+        let intelligence = LiveKeyIntelligence.detect(from: symbols)
+        #expect(intelligence?.key == .D)
+
+        let decision = decide(symbols: symbols, detect: stub(.D, confidence: 0.72))
+        #expect(decision?.action == .commit(key: .D, source: .ensemble))
+    }
+
+    @Test func dMinorProgressionUsesSameCommitFunctionAsSession() {
+        let symbols = ["Dm", "Gm", "A", "Dm"]
+        let decision = decide(
+            symbols: symbols,
+            detect: { live, _ in
+                guard let result = LiveKeyIntelligence.detect(from: live) else { return nil }
+                return AdaptiveKeyDetection(
+                    key: result.key,
+                    confidence: max(result.confidence, 0.70),
+                    source: .ensemble
+                )
+            }
+        )
+        #expect(decision?.action == .commit(key: .D, source: .ensemble))
+    }
+
+    @Test func cooldownBlocksPrematureLetter() {
+        let decision = decide(
+            symbols: ["Dm", "Gm", "A", "Dm"],
+            armedAt: 100,
+            now: 101,
+            detect: stub(.D, confidence: 0.9)
+        )
+        #expect(decision == nil)
+    }
+
+    @Test func latinTonicForDIsRe() {
+        #expect(ChordNotation.latin.cycleGlyph(for: .D) == "Re")
+        #expect(ChordNotation.latin.cycleGlyph(for: .E) == "Mi")
+        #expect(ChordNotation.symbol.cycleGlyph(for: .D) == "D")
+    }
+}
+
+struct ChordRecognizerAutoKeyVoicingTests {
+
+    @Test func dEGWithBassDIsNotEm7() {
+        let symbol = ChordRecognizer.symbol(
+            forPitchClasses: [2, 4, 7],
+            bassPitchClass: 2,
+            preferFlats: false
+        )
+        #expect(symbol != "Em7")
+        #expect(symbol != "Em7/D")
+        if let symbol {
+            #expect(!symbol.hasPrefix("Em"))
+        }
+    }
+
+    @Test func dEGClusterOnPianoIsNotEm7() {
+        // D3 E3 G3 (MIDI 50/52/55) — live D minor cluster that was labeled Em7.
+        let notes = [50, 52, 55]
+        let symbol = ChordRecognizer.symbolConsideringBothHands(notes: notes, preferFlats: false)
+        #expect(symbol != "Em7")
+        #expect(symbol != "Em7/D")
+        if let symbol {
+            #expect(!symbol.hasPrefix("Em"))
+        }
+    }
+
+    @Test func incompleteClusterIsNotAChordVoicing() {
+        #expect(!KeyChordAnalysis.isChordVoicing(pitchClassCount: 3, symbol: "D"))
+        #expect(!KeyChordAnalysis.isChordVoicing(pitchClassCount: 1, symbol: "E"))
+        #expect(KeyChordAnalysis.isChordVoicing(pitchClassCount: 3, symbol: "Dm"))
+    }
+
+    @Test func em7RootPositionWithoutFifthStillMatchesWhenBassIsE() {
+        // E G D (no B) with bass E is a legitimate incomplete Em7.
+        let symbol = ChordRecognizer.symbol(
+            forPitchClasses: [4, 7, 2],
+            bassPitchClass: 4,
+            preferFlats: false
+        )
+        #expect(symbol == "Em7")
+    }
+}
+
 

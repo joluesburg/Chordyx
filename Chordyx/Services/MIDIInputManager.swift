@@ -69,25 +69,47 @@ final class MIDIInputManager: @unchecked Sendable {
     }
 
     func start() {
-        guard !started else { return }
+        if started, inputPort != 0 { return }
+
+        #if os(iOS)
+        let networkSession = MIDINetworkSession.default()
+        networkSession.isEnabled = true
+        networkSession.connectionPolicy = .anyone
+        #endif
+
+        if client == 0 {
+            let clientName = "Chordyx" as CFString
+            let status = MIDIClientCreateWithBlock(clientName, &client) { [weak self] notification in
+                self?.handleNotification(notification)
+            }
+            guard status == noErr, client != 0 else {
+                client = 0
+                started = false
+                return
+            }
+        }
+
+        if inputPort == 0 {
+            let portName = "Chordyx Input" as CFString
+            let status = MIDIInputPortCreateWithBlock(client, portName, &inputPort) { [weak self] packetList, _ in
+                self?.handlePackets(packetList)
+            }
+            guard status == noErr, inputPort != 0 else {
+                inputPort = 0
+                started = false
+                return
+            }
+        }
+
         started = true
-
-        let clientName = "Chordyx" as CFString
-        MIDIClientCreateWithBlock(clientName, &client) { [weak self] notification in
-            self?.handleNotification(notification)
-        }
-
-        let portName = "Chordyx Input" as CFString
-        MIDIInputPortCreateWithBlock(client, portName, &inputPort) { [weak self] packetList, _ in
-            self?.handlePackets(packetList)
-        }
-
         DispatchQueue.main.async { [weak self] in
             self?.refreshSources()
         }
     }
 
     func refreshSources() {
+        guard started, inputPort != 0 else { return }
+
         var discovered: [MIDISourceInfo] = []
         let count = MIDIGetNumberOfSources()
         for index in 0..<count {
@@ -97,7 +119,7 @@ final class MIDIInputManager: @unchecked Sendable {
             discovered.append(MIDISourceInfo(
                 id: endpointID,
                 name: displayName(of: source),
-                isConnected: connectedSources.contains(source)
+                isConnected: connectedSources.contains { uniqueID(of: $0) == endpointID }
             ))
         }
         allSources = discovered
@@ -105,9 +127,17 @@ final class MIDIInputManager: @unchecked Sendable {
 
         let selected = selectedSourceIDs()
         if selected.isEmpty {
-            connectAllSources()
+            connect(sourcesWithIDs: discovered.map(\.id))
+            return
+        }
+
+        let matchingIDs = discovered.map(\.id).filter { selected.contains($0) }
+        if matchingIDs.isEmpty {
+            // Saved unique IDs often change when a USB controller is replugged.
+            UserDefaults.standard.removeObject(forKey: Self.selectedSourcesKey)
+            connect(sourcesWithIDs: discovered.map(\.id))
         } else {
-            connect(sourcesWithIDs: selected)
+            connect(sourcesWithIDs: matchingIDs)
         }
     }
 
@@ -118,17 +148,23 @@ final class MIDIInputManager: @unchecked Sendable {
         } else {
             selected.remove(id)
         }
-        UserDefaults.standard.set(Array(selected), forKey: Self.selectedSourcesKey)
+        UserDefaults.standard.set(selected.map { Int($0) }, forKey: Self.selectedSourcesKey)
         refreshSources()
     }
 
     func connectAllSources() {
         UserDefaults.standard.removeObject(forKey: Self.selectedSourcesKey)
-        connect(sourcesWithIDs: allSources.map(\.id))
+        refreshSources()
     }
 
     private func selectedSourceIDs() -> [Int32] {
-        UserDefaults.standard.array(forKey: Self.selectedSourcesKey) as? [Int32] ?? []
+        let raw = UserDefaults.standard.array(forKey: Self.selectedSourcesKey) ?? []
+        return raw.compactMap { item in
+            if let value = item as? Int32 { return value }
+            if let value = item as? Int { return Int32(truncatingIfNeeded: value) }
+            if let value = item as? NSNumber { return value.int32Value }
+            return nil
+        }
     }
 
     private func connect(sourcesWithIDs ids: [Int32]) {

@@ -15,6 +15,350 @@ enum KeyChordAnalysis: Sendable {
         6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17
     ]
 
+    /// True when the held voicing looks like a real chord (not a melody single note).
+    /// Single pitch-classes were being fed into Auto-key as fake "E"/"D" majors and locking early.
+    static func isChordVoicing(pitchClassCount: Int, symbol: String) -> Bool {
+        guard pitchClassCount >= 2, let parsed = Transposer.parse(symbol) else { return false }
+        let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Bare letters are melody / incomplete clusters (D–E–G falling back to "D") — never chords.
+        if suffix.isEmpty { return false }
+        if pitchClassCount >= 3 { return true }
+        // Power chords / suspensions / explicit qualities count; bare letter dyads do not.
+        return true
+    }
+
+    /// True triad / seventh quality (not power-chord "5" or bare letter) — strengthens Auto-key evidence.
+    static func hasTriadOrSeventhQuality(_ symbol: String) -> Bool {
+        guard let parsed = Transposer.parse(symbol) else { return false }
+        let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if suffix.isEmpty { return false }
+        // Power chords alone are too weak / scale-like to unlock Auto-key by themselves.
+        if suffix == "5" { return false }
+        return true
+    }
+
+    /// Enough ordered chord evidence to announce a key (distinct roots + length, or a cadence).
+    static func hasProgressionEvidence(_ symbols: [String]) -> Bool {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard normalized.count >= 3 else { return false }
+
+        let roots = normalized.compactMap { symbol -> Int? in
+            guard let parsed = Transposer.parse(symbol) else { return nil }
+            return Transposer.pitchClass(ofRoot: parsed.root)
+        }
+        let distinctRoots = Set(roots)
+        guard distinctRoots.count >= 2 else { return false }
+
+        let hasQualityChord = normalized.contains { hasTriadOrSeventhQuality($0) }
+
+        // A real minor (or major cadence) tonic can unlock at 3 events (Dm–Gm–A).
+        if establishedMinorTonic(in: normalized) != nil { return true }
+        if majorCadenceDestination(in: normalized) != nil, hasQualityChord { return true }
+
+        let hasPowerChord = normalized.contains { symbol in
+            guard let parsed = Transposer.parse(symbol) else { return false }
+            return parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines) == "5"
+        }
+
+        // Classic: ≥3 distinct chords with quality — but NOT a 3-event scale run
+        // (Em7–F–G from D–E–G clusters). Need a 4th event so cadences / loops can appear.
+        if distinctRoots.count >= 3, hasQualityChord, normalized.count >= 4,
+           !(hasPowerChord && !hasQualityChord) {
+            return true
+        }
+
+        // Two-chord loops need a clear cadence AND a real quality (not D5–A5 alone).
+        if normalized.count >= 4, hasQualityChord,
+           hasAuthenticOrPlagalCadence(symbols: normalized) {
+            return true
+        }
+
+        // Strong tonic mass over time (same minor/major tonic recurring).
+        if normalized.count >= 5, hasQualityChord, let tonic = dominantTonicRoot(in: roots),
+           roots.filter({ $0 == tonic }).count >= 3 {
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Live tonal center arbitration
+
+    private struct ChordTone: Sendable {
+        let root: Int
+        let isMinor: Bool
+    }
+
+    private static func chordTones(from symbols: [String]) -> [ChordTone] {
+        symbols.compactMap { symbol -> ChordTone? in
+            guard let parsed = Transposer.parse(symbol),
+                  let root = Transposer.pitchClass(ofRoot: parsed.root) else { return nil }
+            let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let isMinor = suffix.hasPrefix("m") && !suffix.hasPrefix("maj")
+            return ChordTone(root: root, isMinor: isMinor)
+        }
+    }
+
+    /// Major tonic that received a clear V→I / IV→I / ii→V→I arrival (live cadence wins).
+    static func majorCadenceDestination(in symbols: [String]) -> Int? {
+        let tones = chordTones(from: symbols)
+        guard tones.count >= 2, let last = tones.last, !last.isMinor else { return nil }
+        let tonic = last.root
+
+        // Final arrival is V→I or IV→I.
+        if tones.count >= 2 {
+            let prev = tones[tones.count - 2]
+            let interval = (tonic - prev.root + 12) % 12
+            if interval == 5 || interval == 7 { return tonic }
+        }
+        // ii→V→I
+        if tones.count >= 3 {
+            let a = tones[tones.count - 3]
+            let b = tones[tones.count - 2]
+            let c = tones[tones.count - 1]
+            let aIsII = a.isMinor && (a.root - c.root + 12) % 12 == 2
+            let bIsV = (b.root - c.root + 12) % 12 == 7
+            if aIsII, bIsV, !c.isMinor { return tonic }
+        }
+        // Phrase ends on I and contains both V and (IV or ii) for that tonic.
+        let hasV = tones.contains { ($0.root - tonic + 12) % 12 == 7 }
+        let hasIV = tones.contains { !$0.isMinor && ($0.root - tonic + 12) % 12 == 5 }
+        let hasII = tones.contains { $0.isMinor && ($0.root - tonic + 12) % 12 == 2 }
+        let tonicHits = tones.filter { $0.root == tonic && !$0.isMinor }.count
+        if tonicHits >= 1, hasV, hasIV || hasII { return tonic }
+        return nil
+    }
+
+    /// Dm–Em–F–G / Dm–Em7–F–G — diatonic climb from ii in a major key (C), not D minor.
+    private static func looksLikeMajorSupertonicRun(tones: [ChordTone], minorRoot: Int) -> Bool {
+        guard let first = tones.first, first.isMinor, first.root == minorRoot else { return false }
+        let roots = Set(tones.map(\.root))
+        let third = (minorRoot + 2) % 12   // Em from Dm
+        let fourth = (minorRoot + 3) % 12  // F
+        let fifth = (minorRoot + 5) % 12   // G
+        let hasClimb = roots.contains(third) && roots.contains(fourth) && roots.contains(fifth)
+        guard hasClimb else { return false }
+        let hasMinorMarkers = tones.contains {
+            let deg = ($0.root - minorRoot + 12) % 12
+            if deg == 5, $0.isMinor { return true } // iv
+            if deg == 8, !$0.isMinor { return true } // bVI
+            if deg == 10, !$0.isMinor { return true } // bVII
+            if deg == 7 { return true } // V of minor
+            return false
+        }
+        return !hasMinorMarkers
+    }
+
+    private static func hasMinorModeSupport(tones: [ChordTone], minorTonic: Int) -> Bool {
+        tones.contains { tone in
+            let deg = (tone.root - minorTonic + 12) % 12
+            if deg == 5, tone.isMinor { return true } // iv
+            if deg == 8, !tone.isMinor { return true } // bVI
+            if deg == 10, !tone.isMinor { return true } // bVII
+            if deg == 7 { return true } // V / v
+            // bIII alone is too weak (G in Em–F–G is also V of C) — don't count it.
+            return false
+        }
+    }
+
+    /// True minor-mode tonic (song in that minor) — not merely ii / vi of a major key.
+    static func establishedMinorTonic(in symbols: [String]) -> Int? {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        let tones = chordTones(from: normalized)
+        guard tones.count >= 3 else { return nil }
+
+        var minorMass = [Int: Double]()
+        var minorHits = [Int: Int]()
+        for (index, tone) in tones.enumerated() where tone.isMinor {
+            let weight = 1.0 + Double(index) / Double(max(tones.count, 1)) * 0.45
+            let frame = (index == 0 || index == tones.count - 1) ? 1.35 : 1.0
+            minorMass[tone.root, default: 0] += weight * frame
+            minorHits[tone.root, default: 0] += 1
+        }
+        guard let (minorTonic, mass) = minorMass.max(by: { $0.value < $1.value }),
+              mass >= 1.15 else { return nil }
+
+        let hits = minorHits[minorTonic] ?? 0
+        let opens = tones.first?.isMinor == true && tones.first?.root == minorTonic
+        let closes = tones.last?.isMinor == true && tones.last?.root == minorTonic
+
+        // Major cadence elsewhere → this minor is ii / vi, not the song tonic.
+        if let majorI = majorCadenceDestination(in: normalized), majorI != minorTonic {
+            let isSupertonicOfMajor = (minorTonic - majorI + 12) % 12 == 2
+            let isRelativeMinorOfMajor = (minorTonic - majorI + 12) % 12 == 9
+            if isSupertonicOfMajor || isRelativeMinorOfMajor {
+                return nil
+            }
+        }
+
+        // Dorian/Aeolian ascending run from ii (Dm Em F G) is C major, not D minor.
+        if looksLikeMajorSupertonicRun(tones: tones, minorRoot: minorTonic) {
+            return nil
+        }
+
+        if closes { return minorTonic }
+        if hits >= 2, opens || closes { return minorTonic }
+        if hits >= 2, mass >= 2.0 { return minorTonic }
+        // Open minor phrase with real minor-mode companions (iv / bVI / V of minor).
+        if opens, hits >= 1, mass >= 1.3, hasMinorModeSupport(tones: tones, minorTonic: minorTonic) {
+            return minorTonic
+        }
+        return nil
+    }
+
+    /// Final arbitration after MIR / neural scores — keeps major I stable and blocks E-from-Dm.
+    static func resolveLiveTonalCenter(
+        symbols: [String],
+        scores: [MusicalKey: Double],
+        currentBest: MusicalKey
+    ) -> MusicalKey {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard normalized.count >= 3 else { return currentBest }
+        let tones = chordTones(from: normalized)
+
+        // 1) Clear major cadence destination always wins over stray minor/ii noise.
+        if let majorI = majorCadenceDestination(in: normalized),
+           let key = MusicalKey.allCases.first(where: { $0.pitchClass == majorI }) {
+            let majorScore = scores[key] ?? 0
+            let bestScore = scores[currentBest] ?? 0
+            let lastRoot = tones.last?.root
+            if key == currentBest || majorScore >= bestScore * 0.55 || lastRoot == majorI {
+                return key
+            }
+        }
+
+        // 2) Ascending ii–iii–IV–V run → major tonic a whole step below the opening minor.
+        if let first = tones.first, first.isMinor,
+           looksLikeMajorSupertonicRun(tones: tones, minorRoot: first.root),
+           let majorKey = MusicalKey.allCases.first(where: { $0.pitchClass == (first.root + 10) % 12 }) {
+            return majorKey
+        }
+
+        // 3) Established minor tonic: prefer it over false iii / unrelated majors.
+        if let minorTonic = establishedMinorTonic(in: normalized),
+           let minorKey = MusicalKey.allCases.first(where: { $0.pitchClass == minorTonic }) {
+            let relativeMajorPC = (minorTonic + 3) % 12
+            if currentBest.pitchClass == minorTonic { return currentBest }
+            if currentBest.pitchClass == relativeMajorPC {
+                let closesMinor = tones.last?.isMinor == true && tones.last?.root == minorTonic
+                if closesMinor { return minorKey }
+                return currentBest
+            }
+            let dist = min(
+                (currentBest.pitchClass - minorTonic + 12) % 12,
+                (minorTonic - currentBest.pitchClass + 12) % 12
+            )
+            if dist >= 2 { return minorKey }
+        }
+
+        return preferMinorTonicIfSupported(symbols: normalized, scores: scores, currentBest: currentBest)
+    }
+
+    /// Live Auto-key veto for candidates that fight the heard progression.
+    static func isImplausibleLiveKeyCandidate(symbols: [String], candidate: MusicalKey) -> Bool {
+        isImplausibleAgainstMinorTonic(symbols: symbols, candidate: candidate)
+    }
+
+    /// Reject keys that fight a clear minor tonic (Dm playing must never announce E/Mi).
+    /// Only when the minor tonic is *established* — not when Dm is merely ii of C / F.
+    static func isImplausibleAgainstMinorTonic(symbols: [String], candidate: MusicalKey) -> Bool {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard normalized.count >= 3 else { return false }
+        guard let minorTonic = establishedMinorTonic(in: normalized) else { return false }
+
+        if candidate.pitchClass == minorTonic { return false }
+        let relativeMajorPC = (minorTonic + 3) % 12
+        if candidate.pitchClass == relativeMajorPC { return false }
+
+        if let majorI = majorCadenceDestination(in: normalized), candidate.pitchClass == majorI {
+            return false
+        }
+
+        let dist = min(
+            (candidate.pitchClass - minorTonic + 12) % 12,
+            (minorTonic - candidate.pitchClass + 12) % 12
+        )
+        return dist >= 2
+    }
+
+    /// Prefer the minor tonal center when the progression is clearly minor-rooted
+    /// (e.g. Dm–Gm–A / Dm–Bb–F–C) instead of jumping to a relative / unrelated major.
+    static func preferMinorTonicIfSupported(
+        symbols: [String],
+        scores: [MusicalKey: Double],
+        currentBest: MusicalKey
+    ) -> MusicalKey {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard normalized.count >= 3 else { return currentBest }
+        let tones = chordTones(from: normalized)
+
+        // Never override a resolved major cadence (C major must stay C when Dm is only ii).
+        if let majorI = majorCadenceDestination(in: normalized),
+           currentBest.pitchClass == majorI {
+            return currentBest
+        }
+        if let first = tones.first, first.isMinor,
+           looksLikeMajorSupertonicRun(tones: tones, minorRoot: first.root),
+           let majorKey = MusicalKey.allCases.first(where: { $0.pitchClass == (first.root + 10) % 12 }) {
+            return majorKey
+        }
+
+        guard let minorTonic = establishedMinorTonic(in: normalized) else {
+            return currentBest
+        }
+        let majorAtSame = tones.filter { $0.root == minorTonic && !$0.isMinor }.count
+        guard majorAtSame == 0 else { return currentBest }
+
+        let candidate = MusicalKey.allCases.first { $0.pitchClass == minorTonic } ?? currentBest
+        if candidate == currentBest { return currentBest }
+
+        let candidateScore = scores[candidate] ?? 0
+        let bestScore = scores[currentBest] ?? 0
+        let relativeMajorPC = (minorTonic + 3) % 12
+        let bestIsRelativeMajor = currentBest.pitchClass == relativeMajorPC
+
+        // Pop I–V–vi–IV: vi is not the song tonic — keep the major center unless phrase closes on i.
+        if bestIsRelativeMajor {
+            let closesMinor = tones.last?.isMinor == true && tones.last?.root == minorTonic
+            if !closesMinor { return currentBest }
+        }
+
+        if bestIsRelativeMajor, candidateScore >= bestScore * 0.68 {
+            return candidate
+        }
+        if candidateScore >= bestScore * 0.80 {
+            return candidate
+        }
+
+        let dist = min((currentBest.pitchClass - minorTonic + 12) % 12,
+                       (minorTonic - currentBest.pitchClass + 12) % 12)
+        // Hard veto only for clear false tonics (E/Mi from Dm), not nearby majors like C↔D.
+        if dist >= 2, !bestIsRelativeMajor {
+            return candidate
+        }
+        return currentBest
+    }
+
+    private static func hasAuthenticOrPlagalCadence(symbols: [String]) -> Bool {
+        guard symbols.count >= 2 else { return false }
+        for i in 1..<symbols.count {
+            guard let a = Transposer.parse(symbols[i - 1]),
+                  let b = Transposer.parse(symbols[i]),
+                  let ra = Transposer.pitchClass(ofRoot: a.root),
+                  let rb = Transposer.pitchClass(ofRoot: b.root) else { continue }
+            let interval = (rb - ra + 12) % 12
+            // V→I (up perfect 4th / down 5th) or IV→I (down perfect 4th).
+            if interval == 5 || interval == 7 { return true }
+        }
+        return false
+    }
+
+    private static func dominantTonicRoot(in roots: [Int]) -> Int? {
+        var counts = [Int: Int]()
+        for root in roots { counts[root, default: 0] += 1 }
+        guard let top = counts.max(by: { $0.value < $1.value }) else { return nil }
+        return top.value >= 2 ? top.key : nil
+    }
+
     static func krumhanselSchmuckler(from symbols: [String]) -> [MusicalKey: Double] {
         var histogram = [Double](repeating: 0, count: 12)
         for (index, symbol) in symbols.enumerated() {

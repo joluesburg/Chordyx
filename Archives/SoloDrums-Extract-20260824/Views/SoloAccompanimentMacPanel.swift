@@ -11,8 +11,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SoloAccompanimentMacPanel: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var progressionStore: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var progressionStore: ProgressionStore
     @State private var isExpanded = true
     @State private var showBandOptions = false
     @State private var showAdvanced = false
@@ -105,7 +105,14 @@ struct SoloAccompanimentMacPanel: View {
             step1TurnOn
 
             if viewModel.soloAccompanimentEnabled {
-                step2TempoAndFeel
+                autoAccompanyStatusCard
+
+                if !ChordyxPreferences.soloAutoAccompany || viewModel.soloTempoLocked {
+                    step2TempoAndFeel
+                } else {
+                    // While auto-listening, keep feel light — full controls after lock or if manual mode.
+                    compactFeelWhileListening
+                }
 
                 if viewModel.soloDrumsAwaitingConfirmation {
                     confirmationCard
@@ -115,12 +122,16 @@ struct SoloAccompanimentMacPanel: View {
                     tempoShiftConfirmationCard(newBPM: Int(newBPM.rounded()))
                 }
 
-                step3Play
+                if !ChordyxPreferences.soloAutoAccompany || viewModel.soloTempoLocked {
+                    step3Play
+                } else if !viewModel.soloTempoLocked {
+                    manualStartFallback
+                }
 
                 bandDisclosure
                 advancedDisclosure
             } else {
-                Text(String(localized: "Turn on Solo Drums, set tempo and feel, then press Start. Detection is optional."))
+                Text(String(localized: "Turn on Auto accompany, play the piano — drums lock to your tempo and follow you live."))
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,10 +182,13 @@ struct SoloAccompanimentMacPanel: View {
     }
 
     private var soloDrumsAudienceHint: String {
+        if ChordyxPreferences.soloAutoAccompany {
+            return String(localized: "Play piano alone — Chordyx hears your tempo and the drums accompany you live.")
+        }
         #if os(macOS)
-        String(localized: "Guests on iPhone see tempo and genre when this is active.")
+        return String(localized: "Guests on iPhone see tempo and genre when this is active.")
         #else
-        String(localized: "Guests see tempo and genre when this is active.")
+        return String(localized: "Guests see tempo and genre when this is active.")
         #endif
     }
 
@@ -204,14 +218,14 @@ struct SoloAccompanimentMacPanel: View {
         .accessibilityLabel(String(localized: "Step \(number): \(title)"))
     }
 
-    // MARK: - Step 1 · Turn on
+    // MARK: - Step 1 · Turn on / Auto accompany
 
     private var step1TurnOn: some View {
         VStack(alignment: .leading, spacing: 10) {
             stepHeader(
                 number: 1,
-                title: String(localized: "Turn on"),
-                subtitle: String(localized: "Enable Solo Drums for this session.")
+                title: String(localized: "Auto accompany"),
+                subtitle: String(localized: "Play the piano — drums detect your tempo and enter on their own.")
             )
 
             Toggle(isOn: Binding(
@@ -221,7 +235,7 @@ struct SoloAccompanimentMacPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(String(localized: "Solo Drums"))
                         .font(.subheadline.weight(.semibold))
-                    Text(String(localized: "Drums follow your playing when you start them."))
+                    Text(String(localized: "Live drum accompaniment for piano alone."))
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -229,10 +243,109 @@ struct SoloAccompanimentMacPanel: View {
             }
             .toggleStyle(.switch)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle(isOn: Binding(
+                get: { ChordyxPreferences.soloAutoAccompany },
+                set: { viewModel.setSoloAutoAccompanyEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Auto accompany"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(String(localized: "No confirm card — drums lock when your tempo is clear, then follow you."))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .disabled(!viewModel.soloAccompanimentEnabled)
+            .opacity(viewModel.soloAccompanimentEnabled ? 1 : 0.55)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppTheme.surfaceElevated.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var autoAccompanyStatusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: statusIcon)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(AppTheme.accentSecondary)
+                    .symbolEffect(.pulse, isActive: viewModel.soloDrumPhase == .listening)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.soloAutoAccompanyStatusLine)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if viewModel.soloDrumPhase == .listening {
+                        ProgressView(value: viewModel.soloDrumsJoinProgress)
+                            .tint(AppTheme.accent)
+                    }
+                    if viewModel.soloTempoLocked, let pattern = Optional(viewModel.soloDrumPattern) {
+                        Text("\(pattern.label) · \(viewModel.soloDrumInstrumentCategory.label)")
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.accent.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var statusIcon: String {
+        switch viewModel.soloDrumPhase {
+        case .listening: "ear"
+        case .awaitingConfirmation: "hand.raised.fill"
+        case .playing: "drum.fill"
+        case .awaitingTempoShiftConfirmation: "metronome.fill"
+        case .idle: "figure.wave"
+        }
+    }
+
+    private var compactFeelWhileListening: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(String(localized: "Feel (optional)"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+            liveGroovePresetsRow
+            instrumentCategorySection
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.accent.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var manualStartFallback: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "Or start now"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+            Button {
+                viewModel.startSoloDrumsAtManualTempo()
+            } label: {
+                Label(String(localized: "Start at \(Int(viewModel.payload.tempoBPM.rounded())) BPM"), systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.accent)
+            .controlSize(.large)
+            Text(String(localized: "Skips detection — use if you already know the tempo."))
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.surfaceElevated.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -248,6 +361,8 @@ struct SoloAccompanimentMacPanel: View {
 
             manualTempoSection
 
+            servicePresetsSection
+
             feelSection
 
             volumeSlider
@@ -260,8 +375,111 @@ struct SoloAccompanimentMacPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    private var servicePresetsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(String(localized: "Service presets"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .textCase(.uppercase)
+                Spacer(minLength: 0)
+                Button {
+                    let defaultName = viewModel.currentSetlistSongTitle
+                        ?? viewModel.payload.sessionName
+                    let name = defaultName.isEmpty
+                        ? String(localized: "My church groove")
+                        : defaultName
+                    _ = viewModel.saveCurrentSoloAsChurchPreset(named: name)
+                } label: {
+                    Label(String(localized: "Save current"), systemImage: "plus.circle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!viewModel.soloAccompanimentEnabled)
+                .help(String(localized: "Save BPM, feel, and kit as a church preset."))
+            }
+
+            Text(String(localized: "One tap — tempo, feel, and kit. Church presets stay on this Mac."))
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if let resume = viewModel.soloGrooveResumeSnapshot, !viewModel.soloTempoLocked {
+                        Button {
+                            viewModel.resumeLastSoloGroove()
+                        } label: {
+                            Label(String(localized: "Resume"), systemImage: "arrow.counterclockwise")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(AppTheme.accentSecondary.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .foregroundStyle(AppTheme.accentSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(resume.caption)
+                    }
+
+                    ForEach(viewModel.customSoloChurchPresets) { preset in
+                        Button {
+                            viewModel.applyCustomSoloChurchPreset(preset)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(preset.label, systemImage: "building.columns.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(preset.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.accent.opacity(0.14))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(String(localized: "Delete"), role: .destructive) {
+                                viewModel.deleteCustomSoloChurchPreset(preset.id)
+                            }
+                        }
+                    }
+
+                    ForEach(SoloServicePreset.all) { preset in
+                        Button {
+                            viewModel.applySoloServicePreset(preset)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(preset.label, systemImage: preset.systemImage)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(preset.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.surfaceElevated.opacity(0.55))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .id(viewModel.soloCustomPresetsRevision)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var feelSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            instrumentCategorySection
+
             if viewModel.soloTempoLocked {
                 liveRhythmChangeSection
             } else {
@@ -286,6 +504,91 @@ struct SoloAccompanimentMacPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             compactGenreRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var instrumentCategorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "Instrument category"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+
+            Text(String(localized: "What plays the groove: full kit, Latin perc, light perc, and more."))
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Chips are the primary control; menu stays as a compact fallback.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SoloDrumInstrumentCategory.allCases) { category in
+                        Button {
+                            viewModel.setSoloDrumInstrumentCategory(category)
+                        } label: {
+                            Label(category.label, systemImage: category.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    viewModel.soloDrumInstrumentCategory == category
+                                    ? AppTheme.accent.opacity(0.18)
+                                    : AppTheme.surfaceElevated.opacity(0.55)
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .foregroundStyle(
+                                    viewModel.soloDrumInstrumentCategory == category
+                                    ? AppTheme.accent
+                                    : AppTheme.textPrimary
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(String(localized: "Save to slot B")) {
+                                viewModel.soloDrumInstrumentCategoryB = category
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(viewModel.soloDrumInstrumentCategory.subtitle)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.swapSoloDrumInstrumentCategoryAB()
+                } label: {
+                    Label(
+                        String(localized: "A/B · \(viewModel.soloDrumInstrumentCategoryB.label)"),
+                        systemImage: "arrow.left.arrow.right"
+                    )
+                    .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(String(localized: "Swap instantly between the current category and slot B without stopping the loop."))
+
+                if let suggested = viewModel.soloSuggestedInstrumentCategory,
+                   suggested != viewModel.soloDrumInstrumentCategory {
+                    Button {
+                        viewModel.applySuggestedSoloInstrumentCategory()
+                    } label: {
+                        Label(
+                            String(localized: "Use \(suggested.label)"),
+                            systemImage: suggested.systemImage
+                        )
+                        .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(AppTheme.accentSecondary)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -557,16 +860,135 @@ struct SoloAccompanimentMacPanel: View {
 
     // MARK: - Advanced
 
+    private var arrangementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(String(localized: "Arrangement"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if viewModel.soloTempoLocked || viewModel.drumAccompaniment.isPlaying {
+                    Text(viewModel.soloCurrentPhraseLabel)
+                        .font(.caption.weight(.bold).monospaced())
+                        .foregroundStyle(AppTheme.background)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accentSecondary)
+                        .clipShape(Capsule())
+                        .accessibilityLabel(String(localized: "Current phrase \(viewModel.soloCurrentPhraseLabel)"))
+                }
+            }
+
+            Picker(String(localized: "Arrangement"), selection: Binding(
+                get: { viewModel.soloDrumArrangeMode },
+                set: { viewModel.setSoloDrumArrangeMode($0) }
+            )) {
+                ForEach(DrumArrangeMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
+            Text(viewModel.soloDrumArrangeMode.subtitle)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Picker(String(localized: "Loop pack"), selection: Binding(
+                get: { viewModel.soloDrumLoopPack },
+                set: { viewModel.setSoloDrumLoopPack($0) }
+            )) {
+                ForEach(DrumMIDILoopPack.allCases) { pack in
+                    Text(pack.label).tag(pack)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Text(viewModel.soloDrumLoopPack.subtitle)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle(isOn: Binding(
+                get: { viewModel.soloDrumHybridLayers },
+                set: { viewModel.setSoloDrumHybridLayers($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Dynamic layers"))
+                        .font(.caption.weight(.semibold))
+                    Text(String(localized: "Softens the groove body under fills — still MIDI, tempo stays free."))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var performanceFollowSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "Performance"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+
+            Toggle(isOn: Binding(
+                get: { viewModel.soloBeatFollowEnabled },
+                set: { viewModel.setSoloBeatFollowEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Follow my tempo"))
+                        .font(.caption.weight(.semibold))
+                    Text(String(localized: "Gently nudges the locked groove when your playing drifts."))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+
+            HStack {
+                Text(String(localized: "Silent count-in"))
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+                Picker(String(localized: "Count-in"), selection: Binding(
+                    get: { viewModel.soloDrumCountInBars },
+                    set: { viewModel.setSoloDrumCountInBars($0) }
+                )) {
+                    Text(String(localized: "Off")).tag(0)
+                    Text(String(localized: "1 bar")).tag(1)
+                    Text(String(localized: "2 bars")).tag(2)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+            }
+
+            Text(String(localized: "Entrance fade after the count-in — groove stays on the grid."))
+                .font(.caption2)
+                .foregroundStyle(AppTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var advancedDisclosure: some View {
         VStack(alignment: .leading, spacing: 10) {
             disclosureHeader(
                 title: String(localized: "Advanced"),
-                subtitle: String(localized: "Microphone listening, drum sounds, and church library."),
+                subtitle: String(localized: "Arrangement, mic listening, drum sounds, and church library."),
                 isOpen: $showAdvanced
             )
 
             if showAdvanced {
                 VStack(alignment: .leading, spacing: 12) {
+                    arrangementSection
+                    performanceFollowSection
                     styleAnalysisRow
                     fusionSourceRow
                     audioAISection
@@ -1217,6 +1639,8 @@ struct SoloAccompanimentMacPanel: View {
             if viewModel.detectedLiveStyle == .edmPulse { return "waveform.path" }
             if viewModel.detectedLiveStyle == .funkGroove { return "bolt.fill" }
             return "guitars"
+        case .urban:
+            return viewModel.detectedLiveStyle == .trapHalftime ? "waveform" : "music.quarternote.3"
         case .jazzBlues: return "saxophone"
         case .latin:
             if viewModel.detectedLiveStyle == .montuno { return "pianokeys" }

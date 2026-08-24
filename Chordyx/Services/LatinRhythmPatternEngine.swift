@@ -138,22 +138,22 @@ enum LatinRhythmPatternEngine {
     }
 
     private static func buildTemplateScores(grid: [Double]) -> (styleScores: [LiveMusicStyle: Double], bestLabel: String?) {
-        let patternMap: [(LiveMusicStyle, DrumPattern, String)] = [
-            (.merengue, .merengue, "Merengue"),
-            (.salsa, .salsa, "Salsa / montuno bell"),
-            (.songo, .songo, "Songó"),
-            (.bossaNova, .bossaNova, "Bossa nova"),
-            (.funkGroove, .funkGroove, "Funk"),
-            (.gospelGroove, .gospelGroove, "Gospel"),
-            (.bolero, .bolero, "Bolero")
+        let patternMap: [(LiveMusicStyle, String)] = [
+            (.merengue, "Merengue"),
+            (.salsa, "Salsa / montuno bell"),
+            (.songo, "Songó"),
+            (.bossaNova, "Bossa nova"),
+            (.funkGroove, "Funk"),
+            (.gospelGroove, "Gospel"),
+            (.bolero, "Bolero")
         ]
 
         var scores: [LiveMusicStyle: Double] = [:]
         var bestLabel: String?
         var bestScore = 0.0
 
-        for (style, pattern, label) in patternMap {
-            let template = drumGrid(for: pattern)
+        for (style, label) in patternMap {
+            let template = drumGrid(for: style)
             let score = correlate(grid: grid, template: template)
             scores[style] = score
             if score > bestScore {
@@ -172,11 +172,25 @@ enum LatinRhythmPatternEngine {
         return (scores, bestLabel)
     }
 
-    static func drumGrid(for pattern: DrumPattern) -> [Double] {
-        (0..<gridSteps).map { step in
-            let events = pattern.events(for: step)
-            guard !events.isEmpty else { return 0 }
-            return Double(events.map(\.velocityScale).reduce(0, +)) / Double(events.count)
+    /// 16th-note density templates derived from former accompaniment grids (style-only).
+    static func drumGrid(for style: LiveMusicStyle) -> [Double] {
+        switch style {
+        case .merengue:
+            [0.8, 0.405, 0.55, 0.57, 0.74, 0.36, 0.55, 0.57, 0.8, 0.405, 0.55, 0.57, 0.74, 0.36, 0.55, 0.57]
+        case .salsa:
+            [0.838, 0.0, 0.51, 0.52, 0.35, 0.4, 0.835, 0.51, 0.85, 0.62, 0.567, 0.44, 0.7, 0.4, 0.51, 0.48]
+        case .songo:
+            [0.885, 0.0, 0.593, 0.68, 0.85, 0.637, 0.59, 0.44, 0.885, 0.0, 0.753, 0.477, 0.85, 0.6, 0.56, 0.465]
+        case .bossaNova:
+            [0.54, 0.3, 0.32, 0.62, 0.4, 0.36, 0.4, 0.535, 0.4, 0.3, 0.47, 0.45, 0.4, 0.36, 0.4, 0.0]
+        case .funkGroove:
+            [0.935, 0.29, 0.43, 0.6, 0.935, 0.6, 0.47, 0.353, 0.935, 0.29, 0.68, 0.35, 0.935, 0.51, 0.47, 0.353]
+        case .gospelGroove:
+            [0.915, 0.27, 0.42, 0.63, 0.915, 0.32, 0.42, 0.22, 0.915, 0.27, 0.64, 0.35, 0.915, 0.32, 0.42, 0.22]
+        case .bolero:
+            [0.74, 0.0, 0.33, 0.55, 0.58, 0.38, 0.55, 0.35, 0.78, 0.38, 0.48, 0.55, 0.58, 0.33, 0.55, 0.42]
+        default:
+            [Double](repeating: 0, count: gridSteps)
         }
     }
 

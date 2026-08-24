@@ -36,17 +36,6 @@ enum PlatformDevice {
         #endif
     }
 
-    /// Solo Drums host: Mac always; iPad yes; iPhone no (guest display only).
-    static var canHostSoloAccompaniment: Bool {
-        #if os(macOS)
-        true
-        #elseif os(iOS)
-        isPad
-        #else
-        false
-        #endif
-    }
-
     /// iPad, Mac, and iOS-on-Mac need explicit button styles for reliable taps.
     static var usesDesktopControls: Bool {
         #if os(macOS)

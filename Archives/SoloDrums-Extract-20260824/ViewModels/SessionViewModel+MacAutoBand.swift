@@ -212,12 +212,14 @@ extension SessionViewModel {
         switch musicStyle {
         case .songo: return .songoPulse
         case .merengue: return .merengueOctave
-        case .montuno, .salsa, .bossaNova: return .latinTumbao
+        case .montuno, .salsa, .bossaNova, .bachata, .cumbia, .chaCha, .soca:
+            return .latinTumbao
         case .bolero, .worshipBallad, .softPulse, .brushWaltz: return .slowBallad
         case .jazzSwing, .bluesShuffle: return .walkSupport
-        case .funkGroove, .rbSoul: return .funkPocket
-        case .edmPulse: return .worshipPocket
-        case .rockDrive, .popRock, .gospelGroove, .countryTrain, .reggaeOneDrop:
+        case .funkGroove, .rbSoul, .discoFour: return .funkPocket
+        case .hipHopBoomBap, .trapHalftime, .dembow: return .funkPocket
+        case .edmPulse, .halfTimeRock: return .worshipPocket
+        case .rockDrive, .popRock, .gospelGroove, .countryTrain, .reggaeOneDrop, .afrobeat:
             return .worshipPocket
         case .unknown: return .worshipPocket
         }

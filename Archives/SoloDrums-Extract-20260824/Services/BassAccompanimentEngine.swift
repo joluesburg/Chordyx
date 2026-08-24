@@ -10,9 +10,7 @@
 import AVFoundation
 import AudioToolbox
 import Foundation
-import Observation
 
-@Observable
 @MainActor
 final class BassAccompanimentEngine {
     private(set) var isPlaying = false
@@ -23,8 +21,9 @@ final class BassAccompanimentEngine {
         didSet { masterMixer.outputVolume = volume }
     }
 
-    private let engine = AVAudioEngine()
-    private let masterMixer = AVAudioMixerNode()
+    /// Created on first playback — never during SessionViewModel / splash launch.
+    private lazy var engine = AVAudioEngine()
+    private lazy var masterMixer = AVAudioMixerNode()
     private var samplerUnit: AVAudioUnitSampler?
     private var synthPlayer: AVAudioPlayerNode?
     private var timer: DispatchSourceTimer?
@@ -43,11 +42,20 @@ final class BassAccompanimentEngine {
     private var synthBufferCache: [UInt16: AVAudioPCMBuffer] = [:]
     private var prefersStudioSynth = false
     private var reverbUnit: AVAudioUnitReverb?
+    /// `mainMixerNode` forces AURemoteIO — defer until first playback (same crash class as drums).
+    private var isOutputGraphWired = false
+    private var didScheduleInitialBackendLoad = false
 
     private static let gmSoundBankPath =
         "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls"
 
     init() {
+        // Defer AVAudioEngine attach until first playback — launch must stay light.
+    }
+
+    private func ensureOutputGraphWired() {
+        guard !isOutputGraphWired else { return }
+        isOutputGraphWired = true
         engine.attach(masterMixer)
         masterMixer.outputVolume = volume
         let reverb = AVAudioUnitReverb()
@@ -57,6 +65,11 @@ final class BassAccompanimentEngine {
         engine.connect(masterMixer, to: reverb, format: nil)
         engine.connect(reverb, to: engine.mainMixerNode, format: nil)
         reverbUnit = reverb
+    }
+
+    private func scheduleInitialBackendLoadIfNeeded() {
+        guard !didScheduleInitialBackendLoad else { return }
+        didScheduleInitialBackendLoad = true
         Task { await loadBackend() }
     }
 
@@ -155,6 +168,8 @@ final class BassAccompanimentEngine {
     }
 
     private func configureAudioIfNeeded() {
+        ensureOutputGraphWired()
+        scheduleInitialBackendLoadIfNeeded()
         #if os(iOS)
         activatePlaybackAudioSession()
         #endif
@@ -179,6 +194,8 @@ final class BassAccompanimentEngine {
     #endif
 
     private func loadBackend() async {
+        ensureOutputGraphWired()
+        didScheduleInitialBackendLoad = true
         if prefersStudioSynth {
             loadStudioSynthBackend()
             return

@@ -88,20 +88,22 @@ final class AdaptiveKeyLearningEngine {
     func detect(from symbols: [String], sessionName: String?) -> AdaptiveKeyDetection? {
         let normalized = normalizedSymbols(symbols)
         guard normalized.count >= Self.minimumSymbols else {
-            // With enough audio evidence alone, still allow a soft lock.
-            return audioOnlyDetectionIfStrong()
+            // Never lock Auto-key from mic chroma alone — wait for chord progression evidence.
+            return nil
         }
 
         let fingerprint = KeyChordAnalysis.fingerprint(from: normalized)
 
-        if let memoryHit = recallMemory(fingerprint: fingerprint, sessionName: sessionName) {
+        if let memoryHit = recallMemory(fingerprint: fingerprint, sessionName: sessionName),
+           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: memoryHit) {
             return AdaptiveKeyDetection(key: memoryHit, confidence: 0.92, source: .memory)
         }
 
         if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
             liveSymbols: normalized,
             library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
-        ), libraryHit.confidence >= 0.72 {
+        ), libraryHit.confidence >= 0.72,
+           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: libraryHit.key) {
             return AdaptiveKeyDetection(
                 key: libraryHit.key,
                 confidence: libraryHit.confidence,
@@ -122,7 +124,7 @@ final class AdaptiveKeyLearningEngine {
             let n = neural[key] ?? 0
             let a = audio?.scores[key] ?? 0
             // Chord intelligence leads; audio chroma + neural refine live lock.
-            blended[key] = intel * 0.52 + h * 0.14 + n * 0.16 + a * 0.18
+            blended[key] = intel * 0.58 + h * 0.16 + n * 0.14 + a * 0.12
         }
 
         if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
@@ -133,48 +135,59 @@ final class AdaptiveKeyLearningEngine {
         }
 
         if let audio {
-            blended[audio.key, default: 0] += audio.confidence * 0.22
+            blended[audio.key, default: 0] += audio.confidence * 0.10
         }
 
         let ranked = blended.sorted { $0.value > $1.value }
-        guard let best = ranked.first, best.value > 0.18,
+        let plausible = ranked.first {
+            !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: $0.key)
+        }
+        guard let best = plausible ?? ranked.first, best.value > 0.18,
               ranked.count >= 2 else {
-            if let intelligence, intelligence.confidence >= 0.14 {
+            if let intelligence, intelligence.confidence >= 0.14,
+               !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: intelligence.bestKey) {
                 return AdaptiveKeyDetection(
                     key: intelligence.bestKey,
                     confidence: intelligence.confidence,
                     source: .ensemble
                 )
             }
-            if let audio, audio.confidence >= 0.28 {
-                return AdaptiveKeyDetection(key: audio.key, confidence: audio.confidence, source: .audio)
-            }
             return heuristic.map {
                 AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
             }
         }
 
-        let runnerUp = ranked[1].value
-        let margin = best.value - runnerUp
-        var confidence = min(1, max(0.15, margin / max(best.value, 0.01)))
-        if let intelligence, intelligence.bestKey == best.key {
+        let resolved = KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: normalized,
+            scores: blended,
+            currentBest: best.key
+        )
+        let resolvedValue = blended[resolved] ?? best.value
+        let runnerUp = ranked.first(where: { $0.key != resolved })?.value ?? ranked[1].value
+        let margin = resolvedValue - runnerUp
+        var confidence = min(1, max(0.15, margin / max(resolvedValue, 0.01)))
+        if let intelligence, intelligence.bestKey == resolved {
             confidence = max(confidence, intelligence.confidence * 0.92)
         }
-        if let audio, audio.key == best.key {
-            confidence = min(1, confidence + audio.confidence * 0.12)
+        if let audio, audio.key == resolved {
+            confidence = min(1, confidence + audio.confidence * 0.08)
         }
 
-        guard confidence >= 0.14 || best.value >= 0.48 else {
+        guard confidence >= 0.14 || resolvedValue >= 0.48 else {
             return heuristic.map {
                 AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
             }
+        }
+
+        if KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: resolved) {
+            return nil
         }
 
         let source: AdaptiveKeyDetection.Source =
-            (audio?.key == best.key && (audio?.confidence ?? 0) >= 0.4 && confidence < 0.5)
+            (audio?.key == resolved && (audio?.confidence ?? 0) >= 0.4 && confidence < 0.5)
             ? .audio
             : .ensemble
-        return AdaptiveKeyDetection(key: best.key, confidence: confidence, source: source)
+        return AdaptiveKeyDetection(key: resolved, confidence: confidence, source: source)
     }
 
     private func freshAudioHint() -> AudioKeyHint? {
@@ -185,11 +198,6 @@ final class AdaptiveKeyLearningEngine {
             return nil
         }
         return hint
-    }
-
-    private func audioOnlyDetectionIfStrong() -> AdaptiveKeyDetection? {
-        guard let audio = freshAudioHint(), audio.confidence >= 0.38 else { return nil }
-        return AdaptiveKeyDetection(key: audio.key, confidence: audio.confidence, source: .audio)
     }
 
     func confirmDetection(symbols: [String], key: MusicalKey, sessionName: String?) {
@@ -241,7 +249,7 @@ final class AdaptiveKeyLearningEngine {
     // MARK: - Memory
 
     private func recallMemory(fingerprint: String, sessionName: String?) -> MusicalKey? {
-        if let exact = memory.first(where: { $0.fingerprint == fingerprint && $0.hitCount >= 1 }),
+        if let exact = memory.first(where: { $0.fingerprint == fingerprint && $0.hitCount >= 2 }),
            let key = MusicalKey(rawValue: exact.keyRaw) {
             return key
         }

@@ -463,7 +463,7 @@ struct HostSetupMusicalKeyCard: View {
 }
 
 struct SessionMusicalKeyPicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Binding var isPresented: Bool
 
     @State private var mode: SessionKeySelectionMode = .auto
@@ -522,15 +522,20 @@ struct SessionMusicalKeyPicker: View {
                 .font(.system(size: 28))
                 .foregroundStyle(AppTheme.accent)
 
-            Text(viewModel.payload.key.displayName)
-                .font(.system(size: 44, weight: .semibold, design: .rounded))
-                .foregroundStyle(AppTheme.textPrimary)
-
             if viewModel.payload.isKeyAutoDetected {
+                Text(viewModel.displayNotation(isGuest: false).cycleGlyph(for: viewModel.payload.key))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+
                 Label(String(localized: "Detected from your playing"), systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.accentSecondary)
             } else {
+                Text(String(localized: "Detecting key…"))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .multilineTextAlignment(.center)
+
                 Label(String(localized: "Listening for chords…"), systemImage: "waveform")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)

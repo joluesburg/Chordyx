@@ -52,7 +52,7 @@ struct BandChatEntryButton: View {
 /// Opt-in sheet chat for everyone in the session.
 struct BandChatSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     /// Used when presented as an overlay panel (sheet `dismiss` is a no-op there).
     var onClose: (() -> Void)? = nil
     @State private var draft = ""
@@ -417,7 +417,7 @@ struct BandChatCompactSheetChrome: ViewModifier {
 
 /// Narrow trailing overlay used on iPad / Mac when Compact chat is on.
 struct BandChatCompactSidePanel: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var onClose: () -> Void
 
     private let panelWidth: CGFloat = 280

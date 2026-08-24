@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct ProgressionMetadataEditor: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @State private var lyricsText = ""
     @State private var newSectionName = ""
     @State private var loopEnabled = false

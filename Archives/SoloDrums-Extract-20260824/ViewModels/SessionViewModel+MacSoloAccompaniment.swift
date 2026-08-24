@@ -7,6 +7,7 @@
 
 #if os(macOS) || os(iOS)
 import Foundation
+import Combine
 
 private enum HostLiveGrooveSyncCache {
     static var lastPublishedSignature = ""
@@ -197,15 +198,77 @@ extension SessionViewModel {
         }
     }
 
-    /// 0…1 progress while the app listens before asking for confirmation.
+    /// 0…1 progress while the app listens before drums enter (auto) or ask for confirmation.
     var soloDrumsJoinProgress: Double {
         guard soloAccompanimentEnabled, soloDrumPhase == .listening else {
             return soloDrumPhase == .playing ? 1 : 0
         }
         guard livePerformanceFusion.estimatedBPM != nil else { return 0 }
-        let sampleProgress = Double(soloTempoLockSamples.count) / Double(Self.soloTempoLockSampleCount)
+        let needed = soloAutoAccompanyLockSampleTarget
+        let sampleProgress = Double(soloTempoLockSamples.count) / Double(max(1, needed))
         let confProgress = min(1, livePerformanceFusion.tempoConfidence / Self.soloTempoLockConfidenceThreshold)
         return min(1, max(sampleProgress, confProgress * 0.85))
+    }
+
+    /// Status line for Auto accompany / listening UI.
+    var soloAutoAccompanyStatusLine: String {
+        if !soloAccompanimentEnabled {
+            return String(localized: "Turn on Solo Drums, then play piano — drums follow you.")
+        }
+        switch soloDrumPhase {
+        case .listening:
+            if let bpm = livePerformanceFusion.estimatedBPM {
+                let conf = Int((livePerformanceFusion.tempoConfidence * 100).rounded())
+                if ChordyxPreferences.soloAutoAccompany {
+                    return String(localized: "Hearing \(TempoMarking.caption(for: bpm)) · \(conf)% — locking…")
+                }
+                return String(localized: "Hearing \(TempoMarking.caption(for: bpm)) · \(conf)%")
+            }
+            return ChordyxPreferences.soloAutoAccompany
+                ? String(localized: "Play the piano — listening for your tempo…")
+                : String(localized: "Listening… play a steady groove")
+        case .awaitingConfirmation:
+            if let proposal = soloPendingProposal {
+                return String(localized: "Ready at \(TempoMarking.caption(for: proposal.bpm)) — confirm to start")
+            }
+            return String(localized: "Ready to start")
+        case .playing:
+            if let bpm = soloLockedBPM {
+                if soloBeatFollowEnabled {
+                    return String(localized: "Accompanying at \(TempoMarking.caption(for: bpm)) · following you")
+                }
+                return String(localized: "Accompanying at \(TempoMarking.caption(for: bpm))")
+            }
+            return String(localized: "Accompanying")
+        case .awaitingTempoShiftConfirmation:
+            if let bpm = soloProposedTempoShiftBPM {
+                return String(localized: "Tempo drift — switch to \(TempoMarking.caption(for: bpm))?")
+            }
+            return String(localized: "Tempo drift detected")
+        case .idle:
+            return String(localized: "Solo Drums idle")
+        }
+    }
+
+    private var soloAutoAccompanyLockSampleTarget: Int {
+        if ChordyxPreferences.soloAutoAccompany,
+           livePerformanceFusion.primaryTempoSource == .midi || livePerformanceFusion.primaryTempoSource == .fused,
+           livePerformanceFusion.tempoConfidence >= Self.soloAutoAccompanyMIDIConfidence {
+            return Self.soloAutoAccompanyLockSampleCount
+        }
+        return Self.soloTempoLockSampleCount
+    }
+
+    func setSoloAutoAccompanyEnabled(_ enabled: Bool) {
+        ChordyxPreferences.soloAutoAccompany = enabled
+        if enabled {
+            setSoloBeatFollowEnabled(true)
+            if soloAccompanimentEnabled, soloDrumPhase == .idle || soloDrumPhase == .listening {
+                // Already listening — keep going.
+            } else if !soloAccompanimentEnabled {
+                setSoloAccompanimentEnabled(true)
+            }
+        }
     }
 
     func trackLivePerformanceFromPiano(activeNotes: [Int]) {
@@ -483,6 +546,40 @@ extension SessionViewModel {
         beginSoloDrumListening()
     }
 
+    /// Manual tempo from the Solo Drums panel (no need to leave for the metronome tab).
+    func setSoloManualTempo(_ bpm: Double) {
+        guard soloAccompanimentEnabled else { return }
+        if soloProposedTempoShiftBPM != nil {
+            soloProposedTempoShiftBPM = nil
+            soloTempoDriftSamples.removeAll()
+            if soloTempoLocked {
+                soloDrumPhase = .playing
+            }
+            livePerformanceFusion.resetDriftAnalysis()
+        }
+        setTempo(bpm)
+        if soloTempoLocked {
+            syncHostLiveGrooveToPayload(force: true)
+        }
+    }
+
+    /// Lock and start drums immediately at the panel tempo (skip listen/confirm).
+    func startSoloDrumsAtManualTempo() {
+        guard soloAccompanimentEnabled, !soloTempoLocked else { return }
+        let bpm = min(max(payload.tempoBPM, Self.minBPM), Self.maxBPM)
+        soloPendingProposal = nil
+        soloProposedTempoShiftBPM = nil
+        soloTempoLockSamples.removeAll()
+        soloTempoDriftSamples.removeAll()
+        if !autoBandMode.includesDrums {
+            autoBandMode = autoBandMode.includesBass ? .fullBand : .drumsOnly
+        }
+        lockSoloDrums(at: bpm, pattern: soloDrumPattern)
+        soloDrumPhase = .playing
+        refreshSoloAudioCapturePolicy()
+        syncHostLiveGrooveToPayload(force: true)
+    }
+
     /// User asks for an immediate proposal from whatever the app has heard so far.
     func proposeSoloDrumDetectionNow() {
         guard soloAccompanimentEnabled, soloDrumPhase == .listening else { return }
@@ -550,6 +647,7 @@ extension SessionViewModel {
     }
 
     func stopSoloAccompaniment() {
+        saveSoloGrooveResumeSnapshotIfNeeded()
         groovePreviewTask?.cancel()
         groovePreviewTask = nil
         soloAccompanimentEnabled = false
@@ -654,6 +752,9 @@ extension SessionViewModel {
         soloProposedTempoShiftBPM = nil
         soloDrumPhase = .listening
         soloDrumsMetronomeArmed = false
+        if ChordyxPreferences.soloAutoAccompany {
+            setSoloBeatFollowEnabled(true)
+        }
         stopHostMetronomeForSoloListening()
         ensureSoloAccompanimentRunning()
     }
@@ -683,7 +784,10 @@ extension SessionViewModel {
         }
 
         let confidence = livePerformanceFusion.tempoConfidence
-        guard confidence >= Self.soloTempoLockConfidenceThreshold else {
+        let confGate = ChordyxPreferences.soloAutoAccompany
+            ? min(Self.soloTempoLockConfidenceThreshold, 0.32)
+            : Self.soloTempoLockConfidenceThreshold
+        guard confidence >= confGate else {
             soloTempoLockSamples.removeAll()
             return
         }
@@ -693,18 +797,20 @@ extension SessionViewModel {
             soloTempoLockSamples.removeFirst(soloTempoLockSamples.count - 10)
         }
 
-        guard soloTempoLockSamples.count >= Self.soloTempoLockSampleCount else { return }
+        let needed = soloAutoAccompanyLockSampleTarget
+        guard soloTempoLockSamples.count >= needed else { return }
 
-        let recent = Array(soloTempoLockSamples.suffix(Self.soloTempoLockSampleCount))
+        let recent = Array(soloTempoLockSamples.suffix(needed))
         let bpms = recent.map(\.bpm)
         guard let minBPM = bpms.min(), let maxBPM = bpms.max() else { return }
-        guard maxBPM - minBPM <= Self.soloTempoLockMaxSpread else {
+        let maxSpread = ChordyxPreferences.soloAutoAccompany ? Self.soloTempoLockMaxSpread + 1.5 : Self.soloTempoLockMaxSpread
+        guard maxBPM - minBPM <= maxSpread else {
             soloTempoLockSamples.removeFirst()
             return
         }
 
         let avgConf = recent.map(\.confidence).reduce(0, +) / Double(recent.count)
-        guard avgConf >= Self.soloTempoLockConfidenceThreshold else { return }
+        guard avgConf >= confGate else { return }
 
         let averaged = bpms.reduce(0, +) / Double(bpms.count)
         presentSoloDrumProposal(bpm: averaged, tempoConfidence: avgConf)
@@ -713,11 +819,15 @@ extension SessionViewModel {
     private func tryFallbackTempoProposal() {
         guard soloDrumPhase == .listening else { return }
         guard let started = soloPlayingSince else { return }
-        guard Date().timeIntervalSince1970 - started >= Self.soloTempoProposalFallbackDelay else { return }
+        let delay = ChordyxPreferences.soloAutoAccompany
+            ? min(Self.soloTempoProposalFallbackDelay, 9)
+            : Self.soloTempoProposalFallbackDelay
+        guard Date().timeIntervalSince1970 - started >= delay else { return }
         guard livePerformanceFusion.isTracking else { return }
 
+        let fallbackConf = ChordyxPreferences.soloAutoAccompany ? 0.22 : 0.24
         if let bpm = livePerformanceFusion.estimatedBPM,
-           livePerformanceFusion.tempoConfidence >= 0.24 {
+           livePerformanceFusion.tempoConfidence >= fallbackConf {
             presentSoloDrumProposal(
                 bpm: bpm,
                 tempoConfidence: livePerformanceFusion.tempoConfidence
@@ -742,8 +852,15 @@ extension SessionViewModel {
         )
         guard proposal != soloPendingProposal else { return }
         soloPendingProposal = proposal
-        soloDrumPhase = .awaitingConfirmation
         soloTempoLockSamples.removeAll()
+
+        // Auto accompany: lock immediately — church musicians shouldn't tap Yes mid-song.
+        if ChordyxPreferences.soloAutoAccompany {
+            confirmSoloDrumGroove()
+            return
+        }
+
+        soloDrumPhase = .awaitingConfirmation
         syncHostLiveGrooveToPayload(force: true)
     }
 
@@ -799,14 +916,18 @@ extension SessionViewModel {
         let smoothed = SoloDrumPolish.emaBPM(
             previous: soloBeatFollowEMA ?? locked,
             sample: drift,
-            alpha: Self.soloBeatFollowEMAAlpha
+            alpha: ChordyxPreferences.soloAutoAccompany
+                ? Self.soloAutoAccompanyEMAAlpha
+                : Self.soloBeatFollowEMAAlpha
         )
         soloBeatFollowEMA = smoothed
 
         let delta = abs(smoothed - locked)
-        let sampleFloor = soloBeatFollowEnabled
-            ? Self.soloTempoFollowSoftDelta
-            : Self.soloTempoDriftMinDelta
+        let sampleFloor: Double = {
+            if !soloBeatFollowEnabled { return Self.soloTempoDriftMinDelta }
+            if ChordyxPreferences.soloAutoAccompany { return Self.soloAutoAccompanyFollowSoftDelta }
+            return Self.soloTempoFollowSoftDelta
+        }()
         guard delta >= sampleFloor else {
             soloTempoDriftSamples.removeAll()
             return
@@ -816,7 +937,10 @@ extension SessionViewModel {
         if soloTempoDriftSamples.count > 8 {
             soloTempoDriftSamples.removeFirst(soloTempoDriftSamples.count - 8)
         }
-        guard soloTempoDriftSamples.count >= Self.soloTempoDriftSampleCount else { return }
+        let driftNeeded = ChordyxPreferences.soloAutoAccompany
+            ? Self.soloAutoAccompanyDriftSampleCount
+            : Self.soloTempoDriftSampleCount
+        guard soloTempoDriftSamples.count >= driftNeeded else { return }
 
         let bpms = soloTempoDriftSamples.map(\.bpm)
         guard let minBPM = bpms.min(), let maxBPM = bpms.max(), maxBPM - minBPM <= 8 else {
@@ -828,8 +952,26 @@ extension SessionViewModel {
         let rounded = SoloDrumPolish.roundHalfBPM(averaged)
         let averagedDelta = abs(rounded - locked)
 
+        let hardDelta = ChordyxPreferences.soloAutoAccompany
+            ? Self.soloAutoAccompanyFollowHardDelta
+            : Self.soloTempoFollowHardDelta
+
         // Professional live follow: small stable nudges apply on the next downbeat.
-        if soloBeatFollowEnabled, averagedDelta < Self.soloTempoFollowHardDelta {
+        if soloBeatFollowEnabled, averagedDelta < hardDelta {
+            soloTempoDriftSamples.removeAll()
+            if drumAccompaniment.isNearDownbeat() {
+                applyLiveBeatFollowNudge(to: rounded)
+            } else {
+                soloPendingBeatFollowBPM = rounded
+            }
+            return
+        }
+
+        // Auto accompany: absorb medium–large drifts without interrupting the pianist.
+        if ChordyxPreferences.soloAutoAccompany,
+           soloBeatFollowEnabled,
+           averagedDelta < 14,
+           livePerformanceFusion.driftTempoConfidence >= 0.38 {
             soloTempoDriftSamples.removeAll()
             if drumAccompaniment.isNearDownbeat() {
                 applyLiveBeatFollowNudge(to: rounded)
@@ -876,11 +1018,204 @@ extension SessionViewModel {
     }
 
     func refreshSoloDrumSectionDynamics() {
-        guard soloAccompanimentEnabled, soloTempoLocked else {
+        guard ChordyxPreferences.sectionDynamicsEnabled,
+              soloAccompanimentEnabled,
+              soloTempoLocked else {
             drumAccompaniment.dynamicsGain = 1
             return
         }
         drumAccompaniment.dynamicsGain = SoloDrumPolish.sectionDynamicsScale(for: activeSection?.kind)
+    }
+
+    /// One-tap service preset: tempo + feel + kit + arrangement.
+    func applySoloServicePreset(_ preset: SoloServicePreset, startImmediately: Bool = true) {
+        guard canDriveSession else { return }
+        if !soloAccompanimentEnabled {
+            setSoloAccompanimentEnabled(true)
+        }
+        setSoloDrumInstrumentCategory(preset.category, userPicked: true)
+        setSoloDrumArrangeMode(preset.arrangeMode)
+        setSoloDrumPattern(preset.pattern)
+        setTempo(preset.bpm)
+        if startImmediately, !soloTempoLocked {
+            startSoloDrumsAtManualTempo()
+        } else if soloTempoLocked {
+            lockOrRetimeSolo(at: preset.bpm, pattern: preset.pattern)
+        }
+        syncHostLiveGrooveToPayload(force: true)
+    }
+
+    var customSoloChurchPresets: [CustomSoloChurchPreset] {
+        CustomSoloChurchPresetStore.loadAll()
+    }
+
+    func refreshCustomSoloChurchPresets() {
+        // Trigger observation by touching a published-adjacent flag if needed.
+        // Custom presets live in UserDefaults; UI reloads via explicit refresh binding.
+        objectWillChangeSendForCustomPresets()
+    }
+
+    private func objectWillChangeSendForCustomPresets() {
+        objectWillChange.send()
+        soloCustomPresetsRevision &+= 1
+    }
+
+    /// Save the current Solo setup as a church preset (max 12).
+    @discardableResult
+    func saveCurrentSoloAsChurchPreset(named name: String) -> CustomSoloChurchPreset? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let bpm = soloLockedBPM ?? payload.tempoBPM
+        let preset = CustomSoloChurchPreset(
+            label: trimmed,
+            bpm: SoloDrumPolish.roundHalfBPM(bpm),
+            pattern: soloDrumPattern,
+            category: soloDrumInstrumentCategory,
+            arrangeMode: soloDrumArrangeMode
+        )
+        CustomSoloChurchPresetStore.upsert(preset)
+        soloCustomPresetsRevision &+= 1
+        return preset
+    }
+
+    func deleteCustomSoloChurchPreset(_ id: UUID) {
+        CustomSoloChurchPresetStore.delete(id: id)
+        soloCustomPresetsRevision &+= 1
+    }
+
+    func applyCustomSoloChurchPreset(_ preset: CustomSoloChurchPreset, startImmediately: Bool = true) {
+        applySoloServicePreset(preset.asServicePreset, startImmediately: startImmediately)
+    }
+
+    /// Soft / Full / Build stage cues nudge kit level without leaving the ring.
+    func applySoloStageCueDynamics(scale: Float) {
+        guard soloAccompanimentEnabled else { return }
+        if soloDrumsCueMuted {
+            soloDrumsCueMuted = false
+            if let previous = soloDrumsVolumeBeforeCueMute {
+                soloDrumVolume = previous
+                soloDrumsVolumeBeforeCueMute = nil
+            }
+        }
+        let base = max(0.35, min(1.15, soloDrumVolume * scale))
+        setSoloDrumVolume(base)
+        if ChordyxPreferences.sectionDynamicsEnabled, soloTempoLocked {
+            // Keep section dynamics relative — cue is an extra push.
+            drumAccompaniment.dynamicsGain = SoloDrumPolish.sectionDynamicsScale(for: activeSection?.kind) * max(0.85, min(1.2, scale))
+        }
+    }
+
+    func toggleSoloDrumsMutedByCue() {
+        guard soloAccompanimentEnabled else { return }
+        if soloDrumsCueMuted {
+            soloDrumsCueMuted = false
+            let restore = soloDrumsVolumeBeforeCueMute ?? 0.72
+            soloDrumsVolumeBeforeCueMute = nil
+            setSoloDrumVolume(restore)
+        } else {
+            soloDrumsCueMuted = true
+            soloDrumsVolumeBeforeCueMute = soloDrumVolume
+            setSoloDrumVolume(0)
+        }
+    }
+
+    func saveSoloGrooveResumeSnapshotIfNeeded() {
+        guard ChordyxPreferences.rememberSoloGroove,
+              soloTempoLocked,
+              let bpm = soloLockedBPM else { return }
+        SoloGrooveResumeStore.save(
+            SoloGrooveResumeSnapshot(
+                bpm: bpm,
+                patternRaw: soloDrumPattern.rawValue,
+                categoryRaw: soloDrumInstrumentCategory.rawValue,
+                arrangeModeRaw: soloDrumArrangeMode.rawValue,
+                savedAt: Date()
+            )
+        )
+    }
+
+    var soloGrooveResumeSnapshot: SoloGrooveResumeSnapshot? {
+        SoloGrooveResumeStore.load()
+    }
+
+    /// Resume last locked Solo groove (BPM / feel / kit).
+    func resumeLastSoloGroove() {
+        guard canDriveSession, let snapshot = SoloGrooveResumeStore.load() else { return }
+        if !soloAccompanimentEnabled {
+            setSoloAccompanimentEnabled(true)
+        }
+        setSoloDrumInstrumentCategory(snapshot.category, userPicked: true)
+        setSoloDrumArrangeMode(snapshot.arrangeMode)
+        setSoloDrumPattern(snapshot.pattern)
+        setTempo(snapshot.bpm)
+        if soloTempoLocked {
+            drumAccompaniment.retimeLockedGroove(to: snapshot.bpm)
+            drumAccompaniment.setPattern(snapshot.pattern, force: true)
+            applySoloDrumLoopSettingsToEngine()
+        } else {
+            startSoloDrumsAtManualTempo()
+        }
+        syncHostLiveGrooveToPayload(force: true)
+    }
+
+    /// Setlist / song change: church memory first, else song tempo on locked groove.
+    func applySoloGrooveForSetlistSong(_ saved: SavedProgression) {
+        guard ChordyxPreferences.autoApplySoloGrooveOnSetlist else { return }
+        guard canDriveSession, soloAccompanimentEnabled else { return }
+
+        refreshServiceLearningLibrary()
+        let title = saved.name.lowercased()
+        if let match = serviceLearningRecords.first(where: {
+            $0.songTitle.compare(saved.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                || $0.songTitle.lowercased().contains(title)
+                || title.contains($0.songTitle.lowercased())
+        }) {
+            // Tempo + pattern only — chords already come from the setlist song.
+            soloDrumPattern = match.drumPattern
+            payload.tempoBPM = match.tempoBPM
+            if soloTempoLocked {
+                drumAccompaniment.setPattern(match.drumPattern, force: true)
+                drumAccompaniment.retimeLockedGroove(to: match.tempoBPM)
+                soloLockedBPM = match.tempoBPM
+                if payload.isMetronomePlaying {
+                    alignMetronomeEpochToSoloGroove()
+                    applyMetronome()
+                }
+            }
+            syncHostLiveGrooveToPayload(force: true)
+            lastServiceLearningSaveMessage = String(
+                localized: "Groove from memory — \(Int(match.tempoBPM)) BPM · \(match.drumPattern.label)"
+            )
+            return
+        }
+
+        let bpm = SoloDrumPolish.roundHalfBPM(min(max(saved.tempoBPM, Self.minBPM), Self.maxBPM))
+        payload.tempoBPM = bpm
+        if soloTempoLocked {
+            soloLockedBPM = bpm
+            drumAccompaniment.retimeLockedGroove(to: bpm)
+            if payload.isMetronomePlaying {
+                alignMetronomeEpochToSoloGroove()
+                applyMetronome()
+            }
+            syncHostLiveGrooveToPayload(force: true)
+        }
+    }
+
+    private func lockOrRetimeSolo(at bpm: Double, pattern: DrumPattern) {
+        let rounded = SoloDrumPolish.roundHalfBPM(bpm)
+        soloDrumPattern = pattern
+        payload.tempoBPM = rounded
+        if soloTempoLocked {
+            soloLockedBPM = rounded
+            drumAccompaniment.setPattern(pattern, force: true)
+            drumAccompaniment.retimeLockedGroove(to: rounded)
+            applySoloDrumLoopSettingsToEngine()
+            if payload.isMetronomePlaying {
+                alignMetronomeEpochToSoloGroove()
+                applyMetronome()
+            }
+        }
     }
 
     func refreshSuggestedSoloInstrumentCategory() {
@@ -1028,6 +1363,7 @@ extension SessionViewModel {
         // Arm metronome after the groove clock exists so phase can lock to the drum grid.
         applySoloDrumsMetronomePolicy()
         autoSaveServiceLearningOnDrumLockIfNeeded()
+        saveSoloGrooveResumeSnapshotIfNeeded()
         refreshSessionAudioPolicy()
         syncHostLiveGrooveToPayload(force: true)
     }

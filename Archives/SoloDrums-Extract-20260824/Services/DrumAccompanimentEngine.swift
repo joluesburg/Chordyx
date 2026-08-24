@@ -7,8 +7,8 @@
 
 import AVFoundation
 import AudioToolbox
+import Combine
 import Foundation
-import Observation
 import os
 
 struct DrumStepEvent: Sendable {
@@ -815,6 +815,16 @@ private final class DrumGrooveClock: @unchecked Sendable {
     private var lastFreeRunningHostTime: CFAbsoluteTime = 0
     var onTick: (@Sendable (Int) -> Void)?
 
+    deinit {
+        // Drop the callback first so a late tick cannot hop into a freed engine.
+        onTick = nil
+        // Cancel on the groove queue without `sync` — syncing from MainActor deinit while
+        // the queue is inside `onTick` → MainActor hop can deadlock / corrupt the stack.
+        queue.async { [timer] in
+            timer?.cancel()
+        }
+    }
+
     func start(bpm: Double, wallClockAnchor: CFAbsoluteTime?) {
         queue.async {
             self.stopLocked()
@@ -907,19 +917,19 @@ private final class DrumGrooveClock: @unchecked Sendable {
     }
 }
 
-@Observable
-final class DrumAccompanimentEngine {
-    private(set) var isPlaying = false
-    private(set) var currentBPM: Double = 72
-    private(set) var currentStep = 0
-    private(set) var isGrooveFrozen = false
-    private(set) var usesSampleDrumKit = false
-    private(set) var soundSourceLabel = String(localized: "Apple GM drums")
-    private(set) var isLoadingSoundSource = false
-    private(set) var soundSourceError: String?
-    private(set) var availableAudioUnits: [DrumAUComponentRef] = []
+@MainActor
+final class DrumAccompanimentEngine: ObservableObject {
+    @Published private(set) var isPlaying = false
+    @Published private(set) var currentBPM: Double = 72
+    @Published private(set) var currentStep = 0
+    @Published private(set) var isGrooveFrozen = false
+    @Published private(set) var usesSampleDrumKit = false
+    @Published private(set) var soundSourceLabel = String(localized: "Apple GM drums")
+    @Published private(set) var isLoadingSoundSource = false
+    @Published private(set) var soundSourceError: String?
+    @Published private(set) var availableAudioUnits: [DrumAUComponentRef] = []
     /// Current arrangement phrase (A / B / Fill / …) for Solo Drums UI.
-    private(set) var currentPhraseKind: DrumPhraseKind = .grooveA
+    @Published private(set) var currentPhraseKind: DrumPhraseKind = .grooveA
 
     var volume: Float = 0.72 {
         didSet { applyOutputVolume() }
@@ -951,7 +961,7 @@ final class DrumAccompanimentEngine {
     var loopPack: DrumMIDILoopPack = .worship
 
     /// Instrument family (batería / percusión / …) that remaps pattern voices.
-    var instrumentCategory: SoloDrumInstrumentCategory = SoloDrumInstrumentCategoryStore.load()
+    var instrumentCategory: SoloDrumInstrumentCategory = .drums
 
     /// When true, quarter-note clicks are rendered on this same audio engine as the kit
     /// (eliminates dual-AVAudioEngine latency vs MetronomeEngine).
@@ -968,9 +978,10 @@ final class DrumAccompanimentEngine {
         }
     }
 
-    private let engine = AVAudioEngine()
-    private let masterMixer = AVAudioMixerNode()
-    private let grooveClickPlayer = AVAudioPlayerNode()
+    /// Created on first playback — never during SessionViewModel / splash launch.
+    private lazy var engine = AVAudioEngine()
+    private lazy var masterMixer = AVAudioMixerNode()
+    private lazy var grooveClickPlayer = AVAudioPlayerNode()
     private var samplerUnit: AVAudioUnitSampler?
     private var pluginUnit: AVAudioUnit?
     private var voicePlayerPools: [DrumVoice: [AVAudioPlayerNode]] = [:]
@@ -986,8 +997,12 @@ final class DrumAccompanimentEngine {
     /// Cross-thread playback flags live in a Sendable gate — safe inside `withLock`.
     private let playbackGate = OSAllocatedUnfairLock(initialState: PlaybackGate())
     private var reverbUnit: AVAudioUnitReverb?
+    /// `mainMixerNode` forces AURemoteIO — never touch it from `init` (app-launch crash / hang).
+    private var isOutputGraphWired = false
+    private var didScheduleInitialSoundLoad = false
+    private var didLoadSoundSourcePreference = false
 
-    private var soundSourceSelectionStorage = DrumSoundSourceStore.load()
+    private var soundSourceSelectionStorage = DrumSoundSourceSelection.default
 
     private var tempoLocked = false
     private var grooveAnchorUnixEpochStorage: Double?
@@ -1017,6 +1032,19 @@ final class DrumAccompanimentEngine {
         "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls"
 
     init() {
+        // Do not touch AVAudioEngine here — constructing/attaching during
+        // SessionViewModel init freezes launch (splash hangs / EXC_BAD_ACCESS).
+        // Sound-source preference is loaded on first configure/playback.
+        grooveClock.onTick = { [weak self] step in
+            Task { @MainActor [weak self] in
+                self?.playGrooveStep(step)
+            }
+        }
+    }
+
+    private func ensureOutputGraphWired() {
+        guard !isOutputGraphWired else { return }
+        isOutputGraphWired = true
         engine.attach(masterMixer)
         engine.attach(grooveClickPlayer)
         applyOutputVolume()
@@ -1029,10 +1057,11 @@ final class DrumAccompanimentEngine {
         // Dry click path — same output device/latency as the kit, no reverb smear.
         engine.connect(grooveClickPlayer, to: engine.mainMixerNode, format: nil)
         reverbUnit = reverb
-        refreshAvailableAudioUnits()
-        grooveClock.onTick = { [weak self] step in
-            self?.playGrooveStep(step)
-        }
+    }
+
+    private func scheduleInitialSoundLoadIfNeeded() {
+        guard !didScheduleInitialSoundLoad else { return }
+        didScheduleInitialSoundLoad = true
         Task { await reloadSoundBackend() }
     }
 
@@ -1123,6 +1152,10 @@ final class DrumAccompanimentEngine {
         isPlaying = false
         currentStep = 0
         grooveClock.stop()
+        silenceActiveMIDINotes()
+        if metronomeClickThroughGroove {
+            grooveClickPlayer.stop()
+        }
     }
 
     private func cancelScheduledPlayback() {
@@ -1203,12 +1236,18 @@ final class DrumAccompanimentEngine {
         if enabled {
             ensureGrooveClickBuffers()
             configureAudioIfNeeded()
+            if ChordyxPreferences.separateClickVolume {
+                grooveClickPlayer.volume = ChordyxPreferences.clickVolume
+            } else {
+                grooveClickPlayer.volume = 1
+            }
             if !grooveClickPlayer.isPlaying { grooveClickPlayer.play() }
         }
     }
 
     private func ensureGrooveClickBuffers() {
         guard grooveAccentClick == nil || grooveNormalClick == nil else { return }
+        ensureOutputGraphWired()
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { return }
         grooveAccentClick = makeGrooveClickBuffer(frequency: 1568, format: format)
@@ -1281,7 +1320,8 @@ final class DrumAccompanimentEngine {
         let clamped = clampBPM(bpm)
         guard abs(clamped - snapshot.bpm) > 0.25 else { return }
 
-        let gate = playbackGate.withLock { state -> PlaybackGate in
+        let (gate, updatedUnixEpoch) = playbackGate.withLock { state -> (PlaybackGate, Double?) in
+            var updatedUnixEpoch: Double?
             if let anchor = state.grooveAnchorTime {
                 let oldSixteenth = (60.0 / state.bpm) / 4.0
                 let newSixteenth = (60.0 / clamped) / 4.0
@@ -1291,11 +1331,14 @@ final class DrumAccompanimentEngine {
                     let absoluteStep = elapsed / oldSixteenth
                     let newAnchor = now - absoluteStep * newSixteenth
                     state.grooveAnchorTime = newAnchor
-                    grooveAnchorUnixEpochStorage = newAnchor + kCFAbsoluteTimeIntervalSince1970
+                    updatedUnixEpoch = newAnchor + kCFAbsoluteTimeIntervalSince1970
                 }
             }
             state.bpm = clamped
-            return state
+            return (state, updatedUnixEpoch)
+        }
+        if let updatedUnixEpoch {
+            grooveAnchorUnixEpochStorage = updatedUnixEpoch
         }
         publishPlaybackMirrors(gate)
         grooveClock.retime(to: clamped, wallClockAnchor: gate.grooveAnchorTime)
@@ -1357,6 +1400,15 @@ final class DrumAccompanimentEngine {
     }
 
     private func configureAudioIfNeeded() {
+        ensureOutputGraphWired()
+        if !didLoadSoundSourcePreference {
+            didLoadSoundSourcePreference = true
+            soundSourceSelectionStorage = DrumSoundSourceStore.load()
+        }
+        scheduleInitialSoundLoadIfNeeded()
+        #if os(macOS)
+        refreshAvailableAudioUnits()
+        #endif
         #if os(iOS)
         activatePlaybackAudioSession()
         #endif
@@ -1390,6 +1442,8 @@ final class DrumAccompanimentEngine {
         let savedStep = currentStep
         let restoredVolume = volume
 
+        ensureOutputGraphWired()
+        didScheduleInitialSoundLoad = true
         isLoadingSoundSource = true
         soundSourceError = nil
         // Mute during graph rebuild so iOS doesn't spit a loud click/noise burst.
@@ -1708,6 +1762,14 @@ final class DrumAccompanimentEngine {
         let hits = resolved.events
         let swing = activeUserMIDILoop?.swingHint ?? pattern.swingAmount
         let sixteenth = (60.0 / snapshot.bpm) / 4.0
+
+        // Quarter-note click on the same engine as the kit (avoids dual-AVAudioEngine latency).
+        if metronomeClickThroughGroove, stepInBar % 4 == 0 {
+            let beatInBar = stepInBar / 4
+            scheduleGrooveClick(accent: beatInBar == 0)
+            onGrooveBeat?(beatInBar, beatInBar == 0)
+        }
+
         for event in hits {
             let delay = grooveDelay(
                 for: stepInBar,
@@ -1718,7 +1780,9 @@ final class DrumAccompanimentEngine {
             if delay > 0.0004 {
                 let captured = event
                 let generation = snapshot.generation
-                DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + delay) { [weak self] in
+                Task { @MainActor [weak self] in
+                    let ns = UInt64(max(0, delay) * 1_000_000_000)
+                    try? await Task.sleep(nanoseconds: ns)
                     guard let self else { return }
                     let stillPlaying = self.playbackGate.withLock { state in
                         state.isPlaying && state.generation == generation
@@ -1899,7 +1963,8 @@ final class DrumAccompanimentEngine {
     ) {
         let generation = playbackGate.withLock { $0.generation }
         let noteDuration = voice.noteOffMilliseconds
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .milliseconds(Int(noteDuration))) { [weak self] in
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(noteDuration) * 1_000_000)
             guard let self else { return }
             let stillPlaying = self.playbackGate.withLock { state in
                 state.isPlaying && state.generation == generation

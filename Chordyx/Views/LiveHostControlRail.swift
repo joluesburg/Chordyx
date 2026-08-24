@@ -13,8 +13,8 @@ enum LiveHostControlRailStyle {
 }
 
 struct LiveHostControlRail: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     var style: LiveHostControlRailStyle
     var isHost: Bool
     var horizontalPadding: CGFloat
@@ -101,13 +101,14 @@ struct LiveHostControlRail: View {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.bottom, 6)
             Divider()
-            tabContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            ScrollView {
+                tabContent
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.bottom, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(height: bottomMaxHeight, alignment: .top)
-        #if os(macOS)
-        .clipped()
-        #endif
     }
 
     private var dockHeader: some View {
@@ -192,13 +193,7 @@ struct LiveHostControlRail: View {
     }
 
     private var shouldAnimateDockTabSwitch: Bool {
-        #if os(macOS) || os(iOS)
-        // Spring-animating heavy Solo / metronome panels while a locked groove plays
-        // stalls the main thread and audibly hiccups the drum clock.
-        !(viewModel.soloAccompanimentEnabled && viewModel.soloTempoLocked)
-        #else
         true
-        #endif
     }
 
     private func selectDockTab(_ tab: LiveHostDockTab) {
@@ -327,13 +322,6 @@ struct LiveHostControlRail: View {
                 quickAction(icon: "metronome", title: String(localized: "Metronome")) {
                     selectDockTab(.metronome)
                 }
-                #if os(macOS) || os(iOS)
-                if viewModel.soloAccompanimentAvailable {
-                    quickAction(icon: "figure.wave", title: String(localized: "Solo Drums")) {
-                        selectDockTab(.audio)
-                    }
-                }
-                #endif
             }
 
             SessionDisplayModeMenu(viewModel: viewModel) {
@@ -361,12 +349,6 @@ struct LiveHostControlRail: View {
             }, style: .compact)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            #if os(macOS) || os(iOS)
-            if viewModel.soloAccompanimentAvailable {
-                SoloAccompanimentMacPanel(viewModel: viewModel, progressionStore: store)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -519,7 +501,7 @@ struct LiveHostControlRail: View {
 }
 
 struct LiveHostTransportStrip: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Binding var selectedTab: LiveHostDockTab
     @Binding var sideRailVisible: Bool
     @Binding var bandCuePadVisible: Bool

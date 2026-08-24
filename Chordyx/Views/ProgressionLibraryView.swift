@@ -8,8 +8,8 @@ import UniformTypeIdentifiers
 
 struct ProgressionLibraryView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
 
     @State private var renameTarget: SavedProgression?
     @State private var renameText = ""

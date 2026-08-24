@@ -24,7 +24,8 @@ struct AudioInputDevice: Identifiable, Equatable, Sendable {
 final class AudioInputCapture: @unchecked Sendable {
     var onBuffer: ((AVAudioPCMBuffer, TimeInterval) -> Void)?
 
-    private let engine = AVAudioEngine()
+    /// Lazily created — constructing AVAudioEngine during SessionViewModel init freezes iPhone launch.
+    private lazy var engine = AVAudioEngine()
     private let processingQueue = DispatchQueue(label: "chordyx.audio.capture", qos: .userInteractive)
     private var isRunning = false
     private var selectedDeviceID: AudioInputDeviceID?

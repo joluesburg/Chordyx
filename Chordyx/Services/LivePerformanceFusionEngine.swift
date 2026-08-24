@@ -7,7 +7,6 @@
 
 #if os(macOS) || os(iOS)
 import Foundation
-import Observation
 
 enum PerformanceAnalysisSource: String, Sendable {
     case fused
@@ -15,22 +14,24 @@ enum PerformanceAnalysisSource: String, Sendable {
     case audio
 }
 
-@Observable
 @MainActor
 final class LivePerformanceFusionEngine {
-    private let midiAnalyzer = LivePerformanceAnalyzer()
-    private let audioAnalyzer = AudioPerformanceAnalyzer()
+    private lazy var midiAnalyzer = LivePerformanceAnalyzer()
+    private lazy var audioAnalyzer = AudioPerformanceAnalyzer()
 
     var audioAIEnabled = true
     /// When true, tempo is locked and drums must not react to new chord/MIDI analysis.
     var grooveLocked = false
     var onFusionUpdated: (() -> Void)?
 
-    private let driftMidiAnalyzer = LivePerformanceAnalyzer()
+    private lazy var driftMidiAnalyzer = LivePerformanceAnalyzer()
     private(set) var driftEstimatedBPM: Double?
     private(set) var driftTempoConfidence: Double = 0
 
-    init() {
+    init() {}
+
+    func bindAudioCallbacksIfNeeded() {
+        guard audioAnalyzer.onAnalysisUpdated == nil else { return }
         audioAnalyzer.onAnalysisUpdated = { [weak self] in
             Task { @MainActor in
                 self?.fuse()
@@ -42,7 +43,7 @@ final class LivePerformanceFusionEngine {
     private(set) var tempoConfidence: Double = 0
     private(set) var detectedStyle: LiveMusicStyle = .unknown
     private(set) var styleConfidence: Double = 0
-    private(set) var suggestedPattern: DrumPattern?
+    private(set) var suggestedStyle: LiveMusicStyle?
     private(set) var syncopationIndex: Double = 0
     private(set) var chordChangesPerMinute: Double = 0
     private(set) var isTracking = false
@@ -64,7 +65,7 @@ final class LivePerformanceFusionEngine {
     private(set) var estimatedAudioKey: MusicalKey?
     private(set) var audioKeyConfidence: Double = 0
     private(set) var audioKeyScores: [MusicalKey: Double] = [:]
-    /// True when mic is open specifically to assist Auto-key (even without Solo Audio AI).
+    /// True when mic is open specifically to assist Auto-key.
     private var keyAssistRequested = false
 
     var detectedGlobalGenre: GlobalMusicGenre? { globalGenreAnalysis.primary }
@@ -79,6 +80,7 @@ final class LivePerformanceFusionEngine {
         activeNoteCount: Int,
         newNotesAdded: Bool
     ) {
+        bindAudioCallbacksIfNeeded()
         midiAnalyzer.registerPerformance(
             chordSymbol: chordSymbol,
             activeNoteCount: activeNoteCount,
@@ -100,6 +102,7 @@ final class LivePerformanceFusionEngine {
     }
 
     func startAudioAI() {
+        bindAudioCallbacksIfNeeded()
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.audioAnalyzer.startListening()
@@ -110,7 +113,7 @@ final class LivePerformanceFusionEngine {
     }
 
     func stopAudioAI() {
-        // Solo / style path asked to stop — keep mic if Auto-key chroma still needs it.
+        // Style path asked to stop — keep mic if Auto-key chroma still needs it.
         if keyAssistRequested {
             isAudioListening = audioAnalyzer.isListening
             fuse()
@@ -122,7 +125,7 @@ final class LivePerformanceFusionEngine {
         fuse()
     }
 
-    /// Host Auto-key: keep mic open for chroma key MIR (can run without Solo Audio AI).
+    /// Host Auto-key: keep mic open for chroma key MIR.
     func setAudioKeyAssistEnabled(_ enabled: Bool) {
         keyAssistRequested = enabled
         if enabled {
@@ -140,7 +143,7 @@ final class LivePerformanceFusionEngine {
         fuse()
     }
 
-    /// Unified mic teardown used when neither Solo Audio AI nor Auto-key assist need capture.
+    /// Unified mic teardown when Auto-key assist no longer needs capture.
     func stopAllAudioCapture() {
         keyAssistRequested = false
         audioAnalyzer.stopListening()
@@ -198,7 +201,7 @@ final class LivePerformanceFusionEngine {
         primaryStyleSource = styleSource
         styleConfidence = styleConf
         syncopationIndex = syncopation
-        suggestedPattern = style.suggestedDrumPattern
+        suggestedStyle = style == .unknown ? nil : style
         latinRhythmAnalysis = fuseLatinAnalysis()
         detectedClave = latinRhythmAnalysis.clave
         montunoStrength = max(midiAnalyzer.montunoStrength, audioAnalyzer.latinRhythmAnalysis.montunoOstinatoStrength)

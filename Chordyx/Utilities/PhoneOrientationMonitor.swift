@@ -97,7 +97,8 @@ final class ChordyxAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        PhoneOrientationMonitor.shared.start()
+        // Do not start CoreMotion / MainActor services here — that raced the splash
+        // and could freeze launch on device. ContentView starts them after home is ready.
         return true
     }
 

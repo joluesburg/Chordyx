@@ -322,25 +322,31 @@ struct PlatformSegmentedPicker<Selection: Hashable>: View {
     private let title: LocalizedStringKey
     @Binding private var selection: Selection
     private let options: [PlatformSegmentedOption<Selection>]
+    /// When false, chips hug their label and scroll horizontally instead of equal-width wrapping/hyphenation.
+    private let equalWidth: Bool
 
     init(
         _ title: LocalizedStringKey,
         selection: Binding<Selection>,
+        equalWidth: Bool = true,
         options: [(Selection, LocalizedStringKey)]
     ) {
         self.title = title
         self._selection = selection
+        self.equalWidth = equalWidth
         self.options = options.map { PlatformSegmentedOption(value: $0.0, label: $0.1) }
     }
 
     init(
         _ title: LocalizedStringKey,
         selection: Binding<Selection>,
+        equalWidth: Bool = true,
         stringOptions: [(Selection, String)]
     ) {
         self.init(
             title,
             selection: selection,
+            equalWidth: equalWidth,
             options: stringOptions.map { ($0.0, LocalizedStringKey(stringLiteral: $0.1)) }
         )
     }
@@ -348,40 +354,56 @@ struct PlatformSegmentedPicker<Selection: Hashable>: View {
     var body: some View {
         // Button segments work reliably inside Form on iPhone, iPad, and Mac.
         // Native .segmented pickers often ignore taps in Form (TestFlight / iOS 18).
-        desktopBody
-    }
-
-    private var desktopBody: some View {
-        HStack(spacing: 8) {
-            ForEach(options, id: \.value) { option in
-                let isSelected = selection == option.value
-                Button {
-                    selection = option.value
-                } label: {
-                    Text(option.label)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .foregroundStyle(isSelected ? AppTheme.textPrimary : AppTheme.textSecondary)
-                        .background(
-                            isSelected ? AppTheme.accent.opacity(0.22) : AppTheme.surface,
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule()
-                                .stroke(
-                                    isSelected ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.08),
-                                    lineWidth: 1
-                                )
-                        }
-                        .contentShape(Capsule())
+        Group {
+            if equalWidth {
+                segmentRow
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    segmentRow
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(title))
+    }
+
+    private var segmentRow: some View {
+        HStack(spacing: 8) {
+            ForEach(options, id: \.value) { option in
+                segmentButton(for: option)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func segmentButton(for option: PlatformSegmentedOption<Selection>) -> some View {
+        let isSelected = selection == option.value
+        Button {
+            selection = option.value
+        } label: {
+            Text(option.label)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(equalWidth ? 0.72 : 1)
+                .padding(.horizontal, equalWidth ? 4 : 14)
+                .padding(.vertical, 9)
+                .frame(maxWidth: equalWidth ? .infinity : nil)
+                .foregroundStyle(isSelected ? AppTheme.textPrimary : AppTheme.textSecondary)
+                .background(
+                    isSelected ? AppTheme.accent.opacity(0.22) : AppTheme.surface,
+                    in: Capsule()
+                )
+                .overlay {
+                    Capsule()
+                        .stroke(
+                            isSelected ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.08),
+                            lineWidth: 1
+                        )
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

@@ -259,6 +259,19 @@ enum DrumPhrasePlayer {
 extension DrumPattern {
     /// Expose fill overlay used by the phrase player (was private).
     func phraseFillEvents(step s: Int) -> [DrumStepEvent] {
+        switch self {
+        case .salsa, .songo, .merengue, .bachata, .cumbia, .chaCha, .soca:
+            return latinFillEvents(step: s)
+        case .hipHopBoomBap, .trapHalftime, .dembow, .discoFour:
+            return urbanFillEvents(step: s)
+        case .bossaNova, .bolero, .worshipBallad, .softPulse, .brushWaltz:
+            return softFillEvents(step: s)
+        default:
+            return rockFillEvents(step: s)
+        }
+    }
+
+    private func rockFillEvents(step s: Int) -> [DrumStepEvent] {
         switch s {
         case 12:
             return [
@@ -280,6 +293,79 @@ extension DrumPattern {
             return [
                 .init(.snare, velocityScale: 0.95),
                 .init(.ride, velocityScale: 0.82)
+            ]
+        default:
+            return []
+        }
+    }
+
+    private func latinFillEvents(step s: Int) -> [DrumStepEvent] {
+        switch s {
+        case 12:
+            return [
+                .init(.rim, velocityScale: 0.72),
+                .init(.conga, velocityScale: 0.7)
+            ]
+        case 13:
+            return [
+                .init(.cowbell, velocityScale: 0.68),
+                .init(.kick, velocityScale: 0.55)
+            ]
+        case 14:
+            return [
+                .init(.conga, velocityScale: 0.82),
+                .init(.rim, velocityScale: 0.6)
+            ]
+        case 15:
+            return [
+                .init(.cowbell, velocityScale: 0.9),
+                .init(.ride, velocityScale: 0.7),
+                .init(.kick, velocityScale: 0.75)
+            ]
+        default:
+            return []
+        }
+    }
+
+    private func urbanFillEvents(step s: Int) -> [DrumStepEvent] {
+        switch s {
+        case 12:
+            return [.init(.kick, velocityScale: 0.88)]
+        case 13:
+            return [
+                .init(.snare, velocityScale: 0.7),
+                .init(.hihatClosed, velocityScale: 0.55)
+            ]
+        case 14:
+            return [
+                .init(.kick, velocityScale: 0.75),
+                .init(.hihatOpen, velocityScale: 0.45)
+            ]
+        case 15:
+            return [
+                .init(.snare, velocityScale: 0.95),
+                .init(.kick, velocityScale: 0.85)
+            ]
+        default:
+            return []
+        }
+    }
+
+    private func softFillEvents(step s: Int) -> [DrumStepEvent] {
+        switch s {
+        case 12:
+            return [.init(.rim, velocityScale: 0.55)]
+        case 13:
+            return [
+                .init(.rim, velocityScale: 0.48),
+                .init(.ride, velocityScale: 0.4)
+            ]
+        case 14:
+            return [.init(.kick, velocityScale: 0.5)]
+        case 15:
+            return [
+                .init(.ride, velocityScale: 0.72),
+                .init(.rim, velocityScale: 0.6)
             ]
         default:
             return []
@@ -312,12 +398,14 @@ extension DrumPattern {
         case .ending:
             return endingEvents(step: s)
         case .fill:
-            // Fill bars still keep a light groove under the overlay.
-            return events(for: s)
+            // Keep light groove under fill overlays; use phrase bar for A/B micro-variation.
+            return events(for: s, barIndex: max(0, barInPhrase))
         case .grooveA:
-            return events(for: s)
+            // Even bars → A pocket (isB false) while phraseBar still advances 0→2→0…
+            return events(for: s, barIndex: max(0, barInPhrase) * 2)
         case .grooveB:
-            return events(for: s)
+            // Odd bars → B pocket (isB true).
+            return events(for: s, barIndex: max(0, barInPhrase) * 2 + 1)
         }
     }
 

@@ -4,8 +4,8 @@
 //
 
 import AVFoundation
+import Combine
 import Foundation
-import Observation
 
 enum BackingTrackError: LocalizedError {
     case copyFailed
@@ -59,14 +59,13 @@ enum BackingTrackStorage {
     }
 }
 
-@Observable
 @MainActor
-final class BackingTrackEngine {
-    private(set) var storedFileName: String?
-    private(set) var displayName: String = ""
-    private(set) var isPlaying = false
-    private(set) var currentTime: TimeInterval = 0
-    private(set) var duration: TimeInterval = 0
+final class BackingTrackEngine: ObservableObject {
+    @Published private(set) var storedFileName: String?
+    @Published private(set) var displayName: String = ""
+    @Published private(set) var isPlaying = false
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
     private var player: AVAudioPlayer?
     private var progressTask: Task<Void, Never>?
 

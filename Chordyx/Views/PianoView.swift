@@ -9,7 +9,7 @@ import UIKit
 #endif
 
 struct PianoView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var onDismiss: (() -> Void)? = nil
     var onLeaveSession: (() -> Void)? = nil
 

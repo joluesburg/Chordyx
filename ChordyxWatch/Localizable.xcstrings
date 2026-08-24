@@ -1,118 +1,119 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "· beat %lld": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "· pulso %lld"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "· beat %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· beat %lld"
           }
         },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "· beat %lld"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· pulso %lld"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "· temps %lld"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· temps %lld"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "· batida %lld"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· batida %lld"
           }
         }
       }
     },
-    "%lld BPM": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld BPM"
+    "%lld BPM" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld BPM"
           }
         },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld BPM"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld BPM"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld BPM"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld BPM"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld BPM"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld BPM"
           }
         }
       }
     },
-    "Next song: %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next song: %@"
+    "Next song: %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next song: %@"
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Siguiente canción: %@"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiente canción: %@"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Prochaine chanson : %@"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prochaine chanson : %@"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Próxima música: %@"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Próxima música: %@"
           }
         }
       }
     },
-    "then %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "luego %@"
+    "then %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "then %@"
           }
         },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "then %@"
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "luego %@"
           }
         },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "puis %@"
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "puis %@"
           }
         },
-        "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "depois %@"
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "depois %@"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

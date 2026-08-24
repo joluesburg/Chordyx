@@ -9,8 +9,8 @@ import SwiftUI
 struct CreateProgressionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.usesHomeDestinationShell) private var usesHomeDestinationShell
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
 
     /// Called after Save & Host so the library sheet can close too.
     var onHosted: (() -> Void)? = nil

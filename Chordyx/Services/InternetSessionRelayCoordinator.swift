@@ -3,8 +3,8 @@
 //  Chordyx
 //
 
+import Combine
 import Foundation
-import Observation
 
 enum InternetRelayTransport: Equatable, Sendable {
     case cloudKit
@@ -13,8 +13,7 @@ enum InternetRelayTransport: Equatable, Sendable {
 
 /// Facade over CloudKit (and optional Firebase) internet session relay.
 @MainActor
-@Observable
-final class InternetSessionRelayCoordinator {
+final class InternetSessionRelayCoordinator: ObservableObject {
     private let cloudKit = CloudKitSessionRelay()
     private var firebase: FirebaseSessionRelay?
     private var activeTransport: InternetRelayTransport = .cloudKit
@@ -23,14 +22,14 @@ final class InternetSessionRelayCoordinator {
     private var latestPayload: SessionSyncPayload?
     private var retryTask: Task<Void, Never>?
 
-    private(set) var isAvailable = false
-    private(set) var isPolling = false
-    private(set) var isPublishing = false
-    private(set) var lastError: String?
-    private(set) var isCloudKitConfigured = true
-    private(set) var activeTransportName: String? = "CloudKit"
-    private(set) var isRelayLive = false
-    private(set) var lastSuccessfulPublishAt: Date?
+    @Published private(set) var isAvailable = false
+    @Published private(set) var isPolling = false
+    @Published private(set) var isPublishing = false
+    @Published private(set) var lastError: String?
+    @Published private(set) var isCloudKitConfigured = true
+    @Published private(set) var activeTransportName: String? = "CloudKit"
+    @Published private(set) var isRelayLive = false
+    @Published private(set) var lastSuccessfulPublishAt: Date?
 
     var onPayloadReceived: ((SessionSyncPayload) -> Void)? {
         didSet { wireCallbacks() }
@@ -146,7 +145,7 @@ final class InternetSessionRelayCoordinator {
         syncPublishedState()
     }
 
-    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 350) {
+    func schedulePublish(payload: SessionSyncPayload, joinCode: String, debounceMs: Int = 100) {
         latestPayload = payload
         switch activeTransport {
         case .cloudKit:

@@ -9,7 +9,7 @@ import UIKit
 #endif
 
 struct SessionMetronomePanel: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var isHost: Bool
     @Binding var metronomeVolume: Double
     var horizontalPadding: CGFloat = 16
@@ -52,12 +52,6 @@ struct SessionMetronomePanel: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.textSecondary)
                     }
-                    if !isHost, viewModel.payload.hostLiveGrooveActive {
-                        Text(TempoMarking.forBPM(viewModel.displayedSessionTempoBPM).label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(AppTheme.accentSecondary)
-                    }
-
                     beatDots
                 }
 
@@ -145,11 +139,7 @@ struct SessionMetronomePanel: View {
 
     private var guestMetronomeControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if viewModel.payload.hostLiveGrooveActive {
-                Text(String(localized: "Tempo follows the Mac host's live groove. You can still hear the click on your phone."))
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.textSecondary)
-            } else if viewModel.displayedMetronomePlaying {
+            if viewModel.displayedMetronomePlaying {
                 Text(String(localized: "Following the host's metronome."))
                     .font(.caption)
                     .foregroundStyle(AppTheme.textSecondary)

@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct InstrumentView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var onDismiss: (() -> Void)? = nil
     var onLeaveSession: (() -> Void)? = nil
 

@@ -3,16 +3,16 @@
 //  Chordyx
 //
 
+import Combine
 import Foundation
 
 @MainActor
-@Observable
-final class SongImportService {
-    var isLoading = false
-    var draft: SongImportDraft?
-    var errorMessage: String?
-    var searchResults: [SongSearchResult] = []
-    var isSearching = false
+final class SongImportService: ObservableObject {
+    @Published var isLoading = false
+    @Published var draft: SongImportDraft?
+    @Published var errorMessage: String?
+    @Published var searchResults: [SongSearchResult] = []
+    @Published var isSearching = false
 
     private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 

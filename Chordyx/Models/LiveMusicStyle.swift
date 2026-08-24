@@ -112,41 +112,6 @@ enum LiveMusicStyle: String, CaseIterable, Identifiable, Sendable {
         case .countryTrain: String(localized: "Country train")
         }
     }
-
-    var suggestedDrumPattern: DrumPattern? {
-        switch self {
-        case .unknown: nil
-        case .worshipBallad: .worshipBallad
-        case .softPulse: .softPulse
-        case .gospelGroove: .gospelGroove
-        case .brushWaltz: .brushWaltz
-        case .popRock: .popRock
-        case .rockDrive: .rockDrive
-        case .halfTimeRock: .halfTimeRock
-        case .funkGroove: .funkGroove
-        case .rbSoul: .rbSoul
-        case .discoFour: .discoFour
-        case .edmPulse: .edmPulse
-        case .hipHopBoomBap: .hipHopBoomBap
-        case .trapHalftime: .trapHalftime
-        case .dembow: .dembow
-        case .jazzSwing: .jazzSwing
-        case .bluesShuffle: .bluesShuffle
-        case .merengue: .merengue
-        case .montuno: .salsa
-        case .salsa: .salsa
-        case .songo: .songo
-        case .bachata: .bachata
-        case .cumbia: .cumbia
-        case .chaCha: .chaCha
-        case .bossaNova: .bossaNova
-        case .bolero: .bolero
-        case .soca: .soca
-        case .reggaeOneDrop: .reggaeOneDrop
-        case .afrobeat: .afrobeat
-        case .countryTrain: .countryTrain
-        }
-    }
 }
 
 enum ChordQualityHint: Sendable {

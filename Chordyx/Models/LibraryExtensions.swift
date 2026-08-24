@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import MultipeerConnectivity
 import SwiftUI
 
 // MARK: - Sections & setlists
@@ -101,24 +100,8 @@ struct ChordyxSetlistExportFile: Codable, Sendable {
 
 // MARK: - Discovery & connection
 
-struct DiscoveredHost: Identifiable, Equatable, Sendable {
-    let peer: MCPeerID
-    let sessionName: String
-    let key: MusicalKey?
-    let tempoBPM: Int?
-    let sessionToken: UUID?
-    var id: String { peer.displayName }
-
-    var subtitle: String {
-        var parts: [String] = ["Host: \(peer.displayName)"]
-        if let key { parts.append("Key \(key.displayName)") }
-        if let tempoBPM { parts.append("\(tempoBPM) BPM") }
-        return parts.joined(separator: " · ")
-    }
-}
-
 struct PendingJoinRequest: Identifiable, Equatable, Sendable {
-    let peer: MCPeerID
+    let peer: PeerReference
     let receivedAt: Date
     var id: String { peer.displayName }
 }

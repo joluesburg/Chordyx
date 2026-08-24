@@ -247,7 +247,9 @@ enum LiveActivityManager {
             sectionName: viewModel.activeSection?.name ?? "",
             currentChord: currentChord,
             nextChord: nextChord,
-            keyName: viewModel.payload.key.displayName,
+            keyName: viewModel.isAutoKeyStillListening
+                ? String(localized: "Detecting key…")
+                : (viewModel.autoKeyDisplayGlyph(isGuest: false) ?? viewModel.payload.key.displayName),
             tempoBPM: Int(viewModel.payload.tempoBPM.rounded()),
             isMetronomePlaying: viewModel.payload.isMetronomePlaying,
             setlistProgress: setlistProgress,
@@ -285,7 +287,9 @@ enum LiveActivityManager {
         isConnected: Bool
     ) -> String {
         if !isConnected {
-            return String(localized: "Reconnecting…")
+            return viewModel.guestLinkStatus == .reconnecting
+                ? String(localized: "Reconnecting…")
+                : viewModel.guestLinkStatus.label
         }
         if currentChord == "—" {
             return String(localized: "Waiting for chords")

@@ -3,13 +3,14 @@
 //  Chordyx
 //
 
+import Combine
 import Foundation
-import MultipeerConnectivity
-import Observation
+@preconcurrency import MultipeerConnectivity
 
-@Observable
+/// Not `@Observable`: Observation + `NSObject` overflowed the iPhone main-thread stack
+/// (`EXC_BAD_ACCESS code=2`) when this type was first created during launch/bootstrap.
 @MainActor
-final class SessionManager: NSObject {
+final class SessionManager: NSObject, ObservableObject {
     static let serviceType = "chordyx"
     static let displayNameKey = "displayName"
     static let requireHostApprovalKey = "requireHostApproval"
@@ -28,24 +29,35 @@ final class SessionManager: NSObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.requireHostApprovalKey) }
     }
 
-    var connectedPeers: [MCPeerID] = []
-    var discoveredHosts: [DiscoveredHost] = []
-    var pendingJoinRequests: [PendingJoinRequest] = []
-    var connectionState: ConnectionState = .idle
-    var lastError: String?
-    var syncQuality: SyncQuality = .unknown
+    @Published var connectedPeers: [MCPeerID] = []
+    @Published var discoveredHosts: [DiscoveredHost] = []
+    @Published var pendingJoinRequests: [PendingJoinRequest] = []
+    @Published var connectionState: ConnectionState = .idle
+    @Published var lastError: String?
+    @Published var syncQuality: SyncQuality = .unknown
 
-    var clockOffset: Double = 0
-    private(set) var hostPeer: MCPeerID?
+    @Published var clockOffset: Double = 0
+    @Published private(set) var hostPeer: MCPeerID?
 
     var hostPeerDisplayName: String? {
         hostPeer?.displayName ?? connectedPeers.first?.displayName
     }
 
-    private var myPeerID = MCPeerID(displayName: PlatformDevice.defaultDisplayName)
+    /// Lazily created — MCPeerID at SessionManager init contributed to launch hangs.
+    private var myPeerIDStorage: MCPeerID?
+    private var myPeerID: MCPeerID {
+        get {
+            if let myPeerIDStorage { return myPeerIDStorage }
+            let created = MCPeerID(displayName: PlatformDevice.defaultDisplayName)
+            myPeerIDStorage = created
+            return created
+        }
+        set { myPeerIDStorage = newValue }
+    }
     private var session: MCSession?
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
+    private var advertiseKeepAliveTask: Task<Void, Never>?
     private var isHost = false
     private var hostingSessionName: String?
     private var hostingKey: MusicalKey = .C
@@ -54,8 +66,11 @@ final class SessionManager: NSObject {
     private var bestRoundTrip: Double = .infinity
     private var calibrationTask: Task<Void, Never>?
     private var pendingInvitations: [String: (Bool, MCSession?) -> Void] = [:]
-    private(set) var isInviting = false
+    /// Maps display names to live MCPeerID instances discovered on the main actor.
+    private var peerRegistry: [String: MCPeerID] = [:]
+    @Published private(set) var isInviting = false
     private var suppressGuestDisconnectNotification = false
+    private var inviteTimeoutTask: Task<Void, Never>?
 
     private var pendingStatePacket: Data?
     private var pendingStatePeer: MCPeerID?
@@ -71,6 +86,8 @@ final class SessionManager: NSObject {
     var onClockOffsetUpdated: (() -> Void)?
     var onControlRequest: ((SessionControlAction, MCPeerID) -> Void)?
     var onGuestDisconnected: (() -> Void)?
+    /// Guest invite timed out / was rejected before any peer connected.
+    var onInviteFailed: (() -> Void)?
 
     enum ConnectionState: Equatable {
         case idle
@@ -95,8 +112,9 @@ final class SessionManager: NSObject {
         // delayed/stuck and could freeze UI; Bonjour prompts when advertising begins.
         beginHosting(sessionName: safeName)
         let serviceType = Self.serviceType
-        Task.detached(priority: .utility) {
+        Task { @MainActor [weak self] in
             await LocalNetworkPermission.requestAccess(serviceType: serviceType)
+            self?.refreshHostingIfNeeded()
         }
     }
 
@@ -104,8 +122,13 @@ final class SessionManager: NSObject {
         lastError = nil
         beginBrowsing()
         let serviceType = Self.serviceType
-        Task.detached(priority: .utility) {
+        Task { @MainActor [weak self] in
             await LocalNetworkPermission.requestAccess(serviceType: serviceType)
+            // Permission dialog can interrupt Bonjour — restart browsing once granted.
+            guard let self, self.browser != nil, !self.isHost else { return }
+            self.browser?.stopBrowsingForPeers()
+            self.browser?.startBrowsingForPeers()
+            self.connectionState = .browsing
         }
     }
 
@@ -176,17 +199,33 @@ final class SessionManager: NSObject {
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: discoveryInfo, serviceType: Self.serviceType)
         advertiser?.delegate = self
         connectionState = .hosting
-        // Defer Bonjour advertise one turn so Session UI stays interactive on first frame.
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            self?.advertiser?.startAdvertisingPeer()
+        // Advertise immediately — deferring this left hosts invisible to guests after Host Setup.
+        advertiser?.startAdvertisingPeer()
+        startAdvertiseKeepAlive()
+    }
+
+    /// Bonjour often goes quiet after Local Network prompts / background — re-announce while hosting.
+    private func startAdvertiseKeepAlive() {
+        advertiseKeepAliveTask?.cancel()
+        advertiseKeepAliveTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(12))
+                guard let self, !Task.isCancelled, self.isHost else { return }
+                self.refreshHostingIfNeeded()
+            }
         }
     }
 
+    private func stopAdvertiseKeepAlive() {
+        advertiseKeepAliveTask?.cancel()
+        advertiseKeepAliveTask = nil
+    }
+
     private func beginBrowsing() {
-        stopAll()
+        stopAll(clearHostPeer: true)
         isHost = false
         discoveredHosts = []
+        peerRegistry = [:]
         myPeerID = MCPeerID(displayName: Self.currentDisplayName())
 
         let mcSession = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
@@ -200,14 +239,32 @@ final class SessionManager: NSObject {
     }
 
     func joinHost(_ host: DiscoveredHost) {
-        hostPeer = host.peer
+        let peerID = host.invitePeerID
+        registerPeer(peerID)
         guard let browser, let session else {
             lastError = String(localized: "Still searching for sessions. Try again in a moment.")
             return
         }
-        guard !isInviting else { return }
+        // Cancel a previous in-flight invite so a second tap / reconnect targets the right host.
+        if isInviting {
+            inviteTimeoutTask?.cancel()
+            inviteTimeoutTask = nil
+            isInviting = false
+        }
+        hostPeer = peerID
         isInviting = true
-        browser.invitePeer(host.peer, to: session, withContext: nil, timeout: 20)
+        lastError = nil
+        inviteTimeoutTask?.cancel()
+        inviteTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(22))
+            guard let self, !Task.isCancelled else { return }
+            guard self.isInviting, self.connectedPeers.isEmpty else { return }
+            self.isInviting = false
+            self.hostPeer = nil
+            self.lastError = String(localized: "Couldn’t connect to the host. Try again.")
+            self.onInviteFailed?()
+        }
+        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 20)
     }
 
     func acceptJoinRequest(_ request: PendingJoinRequest) {
@@ -401,6 +458,7 @@ final class SessionManager: NSObject {
 
     private func stopAll(clearHostPeer: Bool = false) {
         suppressGuestDisconnectNotification = true
+        stopAdvertiseKeepAlive()
         calibrationTask?.cancel()
         calibrationTask = nil
         receiveCoalesceTask?.cancel()
@@ -412,8 +470,11 @@ final class SessionManager: NSObject {
         pendingLiveBroadcast = nil
         lastSentLiveSymbol = nil
         rejectAllPendingInvitations()
+        inviteTimeoutTask?.cancel()
+        inviteTimeoutTask = nil
         isInviting = false
         connectedPeers = []
+        peerRegistry = [:]
         advertiser?.stopAdvertisingPeer()
         advertiser = nil
         browser?.stopBrowsingForPeers()
@@ -431,6 +492,19 @@ final class SessionManager: NSObject {
         guard let active = self.session else { return false }
         return session === active
     }
+
+    private func registerPeer(_ peerID: MCPeerID) {
+        peerRegistry[peerID.displayName] = peerID
+    }
+
+    func peer(for reference: PeerReference) -> MCPeerID? {
+        peerRegistry[reference.displayName]
+            ?? connectedPeers.first { $0.displayName == reference.displayName }
+    }
+
+    var connectedPeerReferences: [PeerReference] {
+        connectedPeers.map(PeerReference.init)
+    }
 }
 
 extension SessionManager: MCSessionDelegate {
@@ -440,15 +514,23 @@ extension SessionManager: MCSessionDelegate {
             let hadPeers = !connectedPeers.isEmpty
             connectedPeers = session.connectedPeers
 
-            if state == .connected || state == .notConnected {
+            if state == .connected {
+                registerPeer(peerID)
                 isInviting = false
+                inviteTimeoutTask?.cancel()
+                inviteTimeoutTask = nil
+            } else if state == .notConnected, isInviting, session.connectedPeers.isEmpty {
+                // Do not fail immediately — Multipeer often reports notConnected before connecting.
+                // joinHost arms a 22s timeout that calls onInviteFailed if still inviting.
             }
 
             if session.connectedPeers.isEmpty {
-                switch connectionState {
-                case .hosting: connectionState = .hosting
-                case .browsing: connectionState = .browsing
-                default: connectionState = .idle
+                if isHost {
+                    connectionState = .hosting
+                } else if browser != nil {
+                    connectionState = .browsing
+                } else {
+                    connectionState = .idle
                 }
                 if !isHost, hadPeers, !suppressGuestDisconnectNotification {
                     syncQuality = .unknown
@@ -468,7 +550,8 @@ extension SessionManager: MCSessionDelegate {
         let packet = data
         let peer = peerID
         Task { @MainActor [weak self] in
-            self?.enqueueReceivedPacket(packet, from: peer)
+            guard let self, self.isActiveSession(session) else { return }
+            self.enqueueReceivedPacket(packet, from: peer)
         }
     }
 
@@ -498,47 +581,78 @@ extension SessionManager: MCSessionDelegate {
 
 extension SessionManager: MCNearbyServiceAdvertiserDelegate {
     nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
-        Task { @MainActor in
-            lastError = error.localizedDescription
+        let message = error.localizedDescription
+        DispatchQueue.main.async { [weak self] in
+            guard let self, advertiser === self.advertiser else { return }
+            self.lastError = message
         }
     }
 
-    nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        Task { @MainActor [weak self] in
-            guard let self else {
-                invitationHandler(false, nil)
-                return
-            }
-            if requireHostApproval {
-                pendingInvitations[peerID.displayName] = invitationHandler
-                if !pendingJoinRequests.contains(where: { $0.peer.displayName == peerID.displayName }) {
-                    pendingJoinRequests.append(PendingJoinRequest(peer: peerID, receivedAt: Date()))
+    /// Invitation handlers must run before this method returns — async MainActor hops
+    /// let Multipeer time out and guests never connect.
+    nonisolated func advertiser(
+        _ advertiser: MCNearbyServiceAdvertiser,
+        didReceiveInvitationFromPeer peerID: MCPeerID,
+        withContext context: Data?,
+        invitationHandler: @escaping (Bool, MCSession?) -> Void
+    ) {
+        let accept: () -> Void = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else {
+                    invitationHandler(false, nil)
+                    return
                 }
-            } else if let activeSession = session {
-                invitationHandler(true, activeSession)
-            } else {
-                invitationHandler(false, nil)
+                guard advertiser === self.advertiser else {
+                    invitationHandler(false, nil)
+                    return
+                }
+                if self.requireHostApproval {
+                    self.registerPeer(peerID)
+                    if let previous = self.pendingInvitations[peerID.displayName] {
+                        previous(false, nil)
+                    }
+                    self.pendingInvitations[peerID.displayName] = invitationHandler
+                    if !self.pendingJoinRequests.contains(where: { $0.peer.displayName == peerID.displayName }) {
+                        self.pendingJoinRequests.append(
+                            PendingJoinRequest(peer: PeerReference(peerID), receivedAt: Date())
+                        )
+                    }
+                } else if let activeSession = self.session {
+                    self.registerPeer(peerID)
+                    invitationHandler(true, activeSession)
+                } else {
+                    invitationHandler(false, nil)
+                }
             }
+        }
+
+        if Thread.isMainThread {
+            accept()
+        } else {
+            DispatchQueue.main.sync(execute: accept)
         }
     }
 }
 
 extension SessionManager: MCNearbyServiceBrowserDelegate {
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self, browser === self.browser else { return }
             lastError = error.localizedDescription
         }
     }
 
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self, browser === self.browser else { return }
             let trimmedName = info?["sessionName"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedName = trimmedName.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.jamSession
             let key = info?["key"].flatMap { MusicalKey(rawValue: $0) }
             let tempo = info?["tempo"].flatMap { Int($0) }
             let token = info?["sessionToken"].flatMap { UUID(uuidString: $0) }
+            registerPeer(peerID)
             let host = DiscoveredHost(
-                peer: peerID,
+                peerID: peerID,
                 sessionName: resolvedName,
                 key: key,
                 tempoBPM: tempo,
@@ -553,7 +667,9 @@ extension SessionManager: MCNearbyServiceBrowserDelegate {
     }
 
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self, browser === self.browser else { return }
+            // Keep peerRegistry entries — Bonjour often flaps lost/found during host refresh.
             discoveredHosts.removeAll { $0.peer.displayName == peerID.displayName }
         }
     }

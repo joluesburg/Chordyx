@@ -60,7 +60,7 @@ struct TempoDriftBanner: View {
 }
 
 struct QuickMessageBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var canSend: Bool
 
     var body: some View {
@@ -223,8 +223,8 @@ struct GhostBandReplayBanner: View {
 // MARK: - Director & audience layouts
 
 struct DirectorModePanel: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -279,7 +279,7 @@ struct DirectorModePanel: View {
 }
 
 struct AudienceLyricsDisplay: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var guestTranspose: Int
     var guestCapo: Int
 
@@ -320,8 +320,8 @@ struct AudienceLyricsDisplay: View {
 // MARK: - Hub & tools
 
 struct ExtendedFeaturesHubView: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var showStats = false
@@ -503,7 +503,7 @@ struct ServiceStatsView: View {
 }
 
 struct ChartDiffSheet: View {
-    @Bindable var store: ProgressionStore
+    @ObservedObject var store: ProgressionStore
     @Binding var leftID: UUID?
     @Binding var rightID: UUID?
     @Environment(\.dismiss) private var dismiss
@@ -558,8 +558,8 @@ struct ChartDiffSheet: View {
 }
 
 struct PlanningCenterImportView: View {
-    @Bindable var store: ProgressionStore
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var pastedText = ""
     @State private var apiURL = ""
@@ -691,7 +691,7 @@ struct SmartSetlistChecklistSection: View {
 }
 
 struct VocalKeyPicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         Menu {

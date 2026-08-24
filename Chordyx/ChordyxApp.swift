@@ -13,9 +13,6 @@ struct ChordyxMacApp: App {
             ContentView()
                 .frame(minWidth: 900, minHeight: 640)
                 .platformDesktopControls()
-                .task {
-                    AdaptiveKeyLearningEngine.shared.reloadFromDisk()
-                }
         }
         .defaultSize(width: 1100, height: 760)
     }
@@ -30,12 +27,6 @@ struct ChordyxApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task {
-                    #if os(iOS)
-                    PhoneOrientationMonitor.shared.start()
-                    #endif
-                    AdaptiveKeyLearningEngine.shared.reloadFromDisk()
-                }
         }
     }
 }

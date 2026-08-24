@@ -4,23 +4,49 @@
 //
 
 import SwiftUI
-import MultipeerConnectivity
+
+private enum HomeSheet: Identifiable {
+    case songImport
+    case hostSetup
+    case joinList
+    case library
+    case practice
+    case setlist
+    case preferences
+
+    var id: Self { self }
+}
+
+/// Reads `isInSession` inside an `@ObservedObject` view so Host/Leave swap the root immediately.
+private struct HomeSessionGate<Home: View>: View {
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @ViewBuilder var home: () -> Home
+
+    var body: some View {
+        Group {
+            if viewModel.isInSession {
+                SessionView(viewModel: viewModel, store: store)
+                    .preferredColorScheme(.dark)
+            } else {
+                home()
+            }
+        }
+    }
+}
 
 struct HomeView: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @Binding var viewModel: SessionViewModel?
+    @Binding var pendingRemoteJoinCode: String?
+    @ObservedObject var store: ProgressionStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage(SessionManager.displayNameKey) private var displayName = ""
-    @State private var showHostSetup = false
-    @State private var showJoinList = false
-    @State private var showLibrary = false
+    @State private var homeSheet: HomeSheet?
     @State private var showRenameDevice = false
-    @State private var showPracticePicker = false
-    @State private var showSetlistPicker = false
-    @State private var showSongImport = false
     @State private var renameText = ""
     @State private var recentSessionRecords = RecentSessionStore.records
+    @State private var joinSheetInitialCode: String?
 
     private var effectiveDeviceName: String {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,17 +70,93 @@ struct HomeView: View {
 
     var body: some View {
         Group {
-            #if os(macOS)
-            // Mac: Session as window root — nested Host Setup + Session sheets freeze hit-testing.
-            if viewModel.isInSession {
-                SessionView(viewModel: viewModel, store: store)
-                    .preferredColorScheme(.dark)
+            if let viewModel {
+                HomeSessionGate(viewModel: viewModel, store: store) {
+                    homeNavigationStack
+                }
             } else {
                 homeNavigationStack
             }
-            #else
-            homeNavigationStack
-            #endif
+        }
+        .preferredColorScheme(.dark)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: pendingRemoteJoinCode) { _, code in
+            guard let code, RemoteJoinCode.isValid(code) else { return }
+            openJoinWithRemoteCode(code)
+        }
+        .onAppear {
+            if let code = pendingRemoteJoinCode, RemoteJoinCode.isValid(code) {
+                openJoinWithRemoteCode(code)
+            }
+        }
+    }
+
+    private func openJoinWithRemoteCode(_ code: String) {
+        pendingRemoteJoinCode = nil
+        joinSheetInitialCode = RemoteJoinCode.normalize(code)
+        _ = ensureRuntime()
+        homeSheet = .joinList
+    }
+
+    @discardableResult
+    private func ensureRuntime() -> SessionViewModel {
+        if let viewModel {
+            viewModel.bootstrapIfNeeded()
+            return viewModel
+        }
+        let created = SessionViewModel()
+        viewModel = created
+        created.bootstrapIfNeeded()
+        #if os(iOS)
+        PhoneOrientationMonitor.shared.start()
+        #endif
+        return created
+    }
+
+    private func dismissHomeSheet() {
+        let leavingHostSetup = homeSheet == .hostSetup
+        let leavingJoinList = homeSheet == .joinList
+        homeSheet = nil
+        if leavingHostSetup {
+            viewModel?.commitPendingHostStartIfNeeded()
+        } else if leavingJoinList {
+            // Don't kill Multipeer while an invite is in flight or the guest already entered session.
+            guard let viewModel, !viewModel.isInSession, !viewModel.sessionManager.isInviting else { return }
+            viewModel.cancelJoinBrowsing()
+        }
+    }
+
+    @ViewBuilder
+    private var homeSheetContent: some View {
+        if let viewModel {
+            switch homeSheet {
+            case .songImport:
+                SongImportView(viewModel: viewModel, store: store)
+            case .hostSetup:
+                HostSetupView(
+                    viewModel: viewModel,
+                    store: store,
+                    isPresented: Binding(
+                        get: { homeSheet == .hostSetup },
+                        set: { if !$0 { dismissHomeSheet() } }
+                    )
+                )
+            case .joinList:
+                JoinSessionView(viewModel: viewModel, initialJoinCode: joinSheetInitialCode)
+                    .onDisappear { joinSheetInitialCode = nil }
+            case .library:
+                ProgressionLibraryView(viewModel: viewModel, store: store)
+            case .practice:
+                PracticePickerView(viewModel: viewModel, store: store)
+            case .setlist:
+                SetlistPickerView(store: store, viewModel: viewModel)
+            case .preferences:
+                PreferencesHubView(viewModel: viewModel, showsSessionLinks: false)
+            case nil:
+                EmptyView()
+            }
+        } else {
+            EmptyView()
         }
     }
 
@@ -66,9 +168,10 @@ struct HomeView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 36 : (verticalSizeClass == .compact ? 16 : 24)) {
                         homeBrandHeader
-                            .padding(.top, PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 12 : 4)
+                            .padding(.top, PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 8 : 4)
 
                         homeActionMenu
+                            .padding(.top, 4)
 
                         VStack(spacing: 12) {
                             deviceNameRow
@@ -77,11 +180,11 @@ struct HomeView: View {
                                 RecentSessionsSection(
                                     records: recentSessionRecords,
                                     onRehost: { record in
-                                        viewModel.rehostRecent(record, store: store)
+                                        ensureRuntime().rehostRecent(record, store: store)
                                     },
                                     onReconnect: { record in
-                                        viewModel.attemptReconnect(to: record)
-                                        showJoinList = true
+                                        ensureRuntime().attemptReconnect(to: record)
+                                        homeSheet = .joinList
                                     },
                                     onDelete: { record in
                                         RecentSessionStore.delete(record)
@@ -111,13 +214,9 @@ struct HomeView: View {
             .onAppear {
                 recentSessionRecords = RecentSessionStore.records
             }
-            .onChange(of: viewModel.isInSession) { _, inSession in
+            .onChange(of: viewModel?.isInSession ?? false) { _, inSession in
                 if inSession {
-                    // Ensure Host/Join covers are closed before the session cover presents (Mac sheets).
-                    showHostSetup = false
-                    showJoinList = false
-                    showPracticePicker = false
-                    showSetlistPicker = false
+                    homeSheet = nil
                 } else {
                     recentSessionRecords = RecentSessionStore.records
                 }
@@ -131,36 +230,14 @@ struct HomeView: View {
             } message: {
                 Text("This is the name other musicians see when you host or join a session.")
             }
-            .platformHomeCover(isPresented: $showSongImport) {
-                SongImportView(viewModel: viewModel, store: store)
+            .platformHomeCover(
+                isPresented: Binding(
+                    get: { homeSheet != nil },
+                    set: { if !$0 { dismissHomeSheet() } }
+                )
+            ) {
+                homeSheetContent
             }
-            .platformHomeCover(isPresented: $showHostSetup) {
-                HostSetupView(viewModel: viewModel)
-            }
-            .platformHomeCover(isPresented: $showJoinList, onDismiss: {
-                if !viewModel.isInSession {
-                    viewModel.sessionManager.disconnect()
-                }
-            }) {
-                JoinSessionView(viewModel: viewModel)
-            }
-            .platformHomeCover(isPresented: $showLibrary) {
-                ProgressionLibraryView(viewModel: viewModel, store: store)
-            }
-            .platformHomeCover(isPresented: $showPracticePicker) {
-                PracticePickerView(viewModel: viewModel, store: store)
-            }
-            .platformHomeCover(isPresented: $showSetlistPicker) {
-                SetlistPickerView(store: store, viewModel: viewModel)
-            }
-            #if !os(macOS)
-            .platformFullScreenCover(isPresented: Binding(
-                get: { viewModel.isInSession },
-                set: { _ in }
-            )) {
-                SessionView(viewModel: viewModel, store: store)
-            }
-            #endif
         }
         .preferredColorScheme(.dark)
     }
@@ -219,6 +296,19 @@ struct HomeView: View {
 
     @ViewBuilder
     private var homeActionMenu: some View {
+        #if os(iOS)
+        if horizontalSizeClass == .compact {
+            homeLayoutStack
+        } else {
+            homeActionMenuAdaptive
+        }
+        #else
+        homeActionMenuAdaptive
+        #endif
+    }
+
+    @ViewBuilder
+    private var homeActionMenuAdaptive: some View {
         ViewThatFits(in: .horizontal) {
             homeLayoutExpanded
                 .frame(minWidth: 980)
@@ -295,10 +385,12 @@ struct HomeView: View {
                     homePracticeButton(style: .compact)
                     homeSetlistButton(style: .compact)
                 }
+                homePreferencesButton(style: .compact)
             case .list, .compact:
                 VStack(spacing: gridSpacing) {
                     homePracticeButton(style: .compact)
                     homeSetlistButton(style: .compact)
+                    homePreferencesButton(style: .compact)
                 }
             }
         }
@@ -310,18 +402,22 @@ struct HomeView: View {
             subtitle: String(localized: "Invite musicians — chord ring or live piano"),
             icon: "music.mic",
             style: style
-        ) { showHostSetup = true }
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .hostSetup
+        }
     }
 
     private func homeJoinButton(style: HomeActionStyle) -> some View {
         actionButton(
             title: "Join a Session",
-            subtitle: String(localized: "Connect to a nearby host"),
+            subtitle: String(localized: "Nearby Wi‑Fi or Internet join code"),
             icon: "person.2.wave.2",
             style: style
         ) {
-            viewModel.beginJoining()
-            showJoinList = true
+            joinSheetInitialCode = nil
+            ensureRuntime().beginJoining()
+            homeSheet = .joinList
         }
     }
 
@@ -331,7 +427,10 @@ struct HomeView: View {
             subtitle: progressionsSubtitle,
             icon: "bookmark.fill",
             style: style
-        ) { showLibrary = true }
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .library
+        }
     }
 
     private func homeImportButton(style: HomeActionStyle) -> some View {
@@ -340,7 +439,10 @@ struct HomeView: View {
             subtitle: String(localized: "Search by title — chords and lyrics from the web"),
             icon: "arrow.down.doc.fill",
             style: style
-        ) { showSongImport = true }
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .songImport
+        }
     }
 
     private func homePracticeButton(style: HomeActionStyle) -> some View {
@@ -349,7 +451,10 @@ struct HomeView: View {
             subtitle: String(localized: "Rehearse with the ring and metronome"),
             icon: "metronome",
             style: style
-        ) { showPracticePicker = true }
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .practice
+        }
     }
 
     private func homeSetlistButton(style: HomeActionStyle) -> some View {
@@ -358,7 +463,22 @@ struct HomeView: View {
             subtitle: String(localized: "Play multiple songs in one session"),
             icon: "list.bullet.rectangle",
             style: style
-        ) { showSetlistPicker = true }
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .setlist
+        }
+    }
+
+    private func homePreferencesButton(style: HomeActionStyle) -> some View {
+        actionButton(
+            title: "Preferences",
+            subtitle: String(localized: "MIDI, click, cues, guest display"),
+            icon: "gearshape.fill",
+            style: style
+        ) {
+            _ = ensureRuntime()
+            homeSheet = .preferences
+        }
     }
 
     private func homeSectionHeader(_ title: LocalizedStringKey) -> some View {
@@ -496,8 +616,9 @@ struct HomeView: View {
 }
 
 struct HostSetupView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
+    @Binding var isPresented: Bool
 
     @State private var sessionName = ""
     @State private var selectedKey: MusicalKey = .C
@@ -671,7 +792,7 @@ struct HostSetupView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Cancel")) { dismiss() }
+                    Button(String(localized: "Cancel")) { isPresented = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(String(localized: "Start")) {
@@ -692,39 +813,35 @@ struct HostSetupView: View {
         let autoDetectKey = keySelectionMode == .auto
         // Auto AI: don't lock a manual chart key — start neutral (C) until detection from playing.
         let key = autoDetectKey ? MusicalKey.C : selectedKey
-        let kind = sessionKind
-        let notation = selectedNotation
-        let mode = performanceMode
+        let resolvedName = name.isEmpty ? L10n.jamSession : name
 
-        // Dismiss Host Setup first. Starting the session (isInSession = true) before dismiss
-        // tears down covers while animating out → crash.
-        dismiss()
-
-        Task { @MainActor in
-            #if os(macOS)
-            try? await Task.sleep(for: .milliseconds(280))
-            #else
-            try? await Task.sleep(for: .milliseconds(150))
-            #endif
-            let resolvedName = name.isEmpty ? L10n.jamSession : name
-            switch kind {
-            case .progression:
-                viewModel.hostSession(
+        // Stage the start on the view model, then dismiss. A Task inside this sheet is
+        // cancelled when SwiftUI tears the cover down — Start would appear to do nothing.
+        // `commitPendingHostStartIfNeeded()` runs from the cover's onDismiss.
+        switch sessionKind {
+        case .progression:
+            viewModel.preparePendingHostStart(
+                .progression(
                     name: resolvedName,
                     key: key,
-                    notation: notation,
-                    performanceMode: mode,
+                    notation: selectedNotation,
+                    performanceMode: performanceMode,
                     autoDetectKey: autoDetectKey
-                )
-            case .liveChords:
-                viewModel.hostLiveChordsSession(
+                ),
+                libraryStore: store
+            )
+        case .liveChords:
+            viewModel.preparePendingHostStart(
+                .liveChords(
                     name: resolvedName,
                     key: key,
-                    notation: notation,
+                    notation: selectedNotation,
                     autoDetectKey: autoDetectKey
-                )
-            }
+                ),
+                libraryStore: store
+            )
         }
+        isPresented = false
     }
 }
 
@@ -983,8 +1100,8 @@ private struct HostSetupModernKeyCard: View {
 
 struct PracticePickerView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
 
     var body: some View {
         NavigationStack {
@@ -1027,58 +1144,217 @@ struct PracticePickerView: View {
 
 struct JoinSessionView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject private var sessionManager: SessionManager
+    @State private var joinCodeText = ""
+    @State private var isJoiningRemote = false
+    @State private var remoteJoinTask: Task<Void, Never>?
+    #if os(iOS)
+    @State private var showQRScanner = false
+    #endif
+
+    /// Prefill from a deep link / recent reconnect.
+    var initialJoinCode: String? = nil
+
+    init(viewModel: SessionViewModel, initialJoinCode: String? = nil) {
+        self.viewModel = viewModel
+        self.initialJoinCode = initialJoinCode
+        _sessionManager = ObservedObject(wrappedValue: viewModel.sessionManager)
+        if let initialJoinCode {
+            _joinCodeText = State(initialValue: RemoteJoinCode.formatted(initialJoinCode))
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.sessionManager.discoveredHosts.isEmpty {
-                    searchingState
-                } else {
-                    List(viewModel.sessionManager.discoveredHosts) { host in
-                        Button {
-                            viewModel.join(host: host)
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Image(systemName: "music.note.house.fill")
-                                    .foregroundStyle(AppTheme.accent)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(host.sessionName)
-                                        .foregroundStyle(AppTheme.textPrimary)
-                                        .font(.headline)
-                                    Text(host.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(AppTheme.textSecondary)
-                                }
-                                Spacer()
-                                Image(systemName: "arrow.right.circle.fill")
-                                    .foregroundStyle(AppTheme.accentSecondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(AppTheme.surface)
-                    }
-                    .scrollContentBackground(.hidden)
-                    #if os(macOS)
-                    .listStyle(.inset)
-                    #endif
-                }
+            VStack(spacing: 0) {
+                internetJoinSection
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                Divider().overlay(AppTheme.surfaceElevated)
+
+                nearbySection
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppTheme.background)
             .navigationTitle("Join Session")
             .platformInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        cancelRemoteJoinAttempt()
+                        viewModel.cancelJoinBrowsing()
+                        dismiss()
+                    }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if let error = sessionManager.lastError, !isJoiningRemote {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showQRScanner) {
+                JoinQRScannerSheet { code in
+                    showQRScanner = false
+                    joinCodeText = RemoteJoinCode.formatted(code)
+                    startRemoteJoin(with: code)
+                }
+            }
+            #endif
         }
         .preferredColorScheme(.dark)
         .platformLibrarySheetFrame()
-        .onChange(of: viewModel.sessionManager.discoveredHosts.count) { _, _ in
+        .onAppear {
+            if sessionManager.connectionState == .idle, !isJoiningRemote {
+                viewModel.beginJoining()
+            }
+            if let initialJoinCode, RemoteJoinCode.isValid(initialJoinCode), !viewModel.isInSession {
+                startRemoteJoin(with: initialJoinCode)
+            }
+        }
+        .onDisappear {
+            cancelRemoteJoinAttempt()
+        }
+        .onChange(of: sessionManager.discoveredHosts.count) { _, _ in
             viewModel.tryAutoReconnectIfPossible()
+        }
+        .onChange(of: viewModel.isInSession) { _, inSession in
+            if inSession { dismiss() }
+        }
+    }
+
+    private var internetJoinSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(String(localized: "Internet join code"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            Text(String(localized: "When Wi‑Fi is unreliable, enter the host’s 6-character code or scan their QR."))
+                .font(.caption)
+                .foregroundStyle(AppTheme.textSecondary)
+
+            HStack(spacing: 10) {
+                TextField(String(localized: "ABC-123"), text: $joinCodeText)
+                    .textFieldStyle(.plain)
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AppTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .disabled(isJoiningRemote)
+                    #if os(iOS)
+                    .textInputAutocapitalization(.characters)
+                    .keyboardType(.asciiCapable)
+                    .autocorrectionDisabled()
+                    #endif
+                    .onSubmit { startRemoteJoinFromField() }
+
+                Button {
+                    startRemoteJoinFromField()
+                } label: {
+                    if isJoiningRemote {
+                        ProgressView()
+                            .tint(AppTheme.background)
+                            .frame(width: 28, height: 28)
+                    } else {
+                        Text(String(localized: "Join"))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.background)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(canSubmitRemoteCode ? AppTheme.accent : AppTheme.accent.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .disabled(!canSubmitRemoteCode || isJoiningRemote)
+            }
+
+            #if os(iOS)
+            Button {
+                showQRScanner = true
+            } label: {
+                Label(String(localized: "Scan QR code"), systemImage: "qrcode.viewfinder")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.surfaceElevated)
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isJoiningRemote)
+            #endif
+
+            if isJoiningRemote {
+                Text(String(localized: "Connecting over the Internet…"))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.accent)
+            } else if viewModel.guestLinkStatus == .connecting || sessionManager.isInviting {
+                Text(viewModel.guestLinkStatus.label)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.accent)
+            } else if viewModel.guestLinkStatus == .searching {
+                Text(viewModel.guestLinkStatus.label)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var nearbySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "Nearby on Wi‑Fi"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
+            if sessionManager.discoveredHosts.isEmpty {
+                searchingState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(sessionManager.discoveredHosts) { host in
+                    Button {
+                        viewModel.join(host: host)
+                    } label: {
+                        HStack {
+                            Image(systemName: "music.note.house.fill")
+                                .foregroundStyle(AppTheme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(host.sessionName)
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .font(.headline)
+                                Text(host.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundStyle(AppTheme.accentSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(AppTheme.surface)
+                    .disabled(isJoiningRemote)
+                }
+                .scrollContentBackground(.hidden)
+                #if os(macOS)
+                .listStyle(.inset)
+                #endif
+            }
         }
     }
 
@@ -1086,19 +1362,11 @@ struct JoinSessionView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .tint(AppTheme.accent)
-            Text("Searching for nearby sessions…")
+            Text(String(localized: "Searching for nearby sessions…"))
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.textSecondary)
 
-            if let error = viewModel.sessionManager.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
-
-            Text("Use the same Wi‑Fi on both devices and allow Local Network access for Chordyx in Settings.")
+            Text(String(localized: "Use the same Wi‑Fi on both devices, or join with the Internet code above."))
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -1106,4 +1374,64 @@ struct JoinSessionView: View {
         }
         .padding(24)
     }
+
+    private var canSubmitRemoteCode: Bool {
+        RemoteJoinCode.isValid(joinCodeText)
+    }
+
+    private func startRemoteJoinFromField() {
+        let code = RemoteJoinCode.normalize(joinCodeText)
+        guard RemoteJoinCode.isValid(code) else {
+            sessionManager.lastError = String(localized: "Enter a 6-character join code.")
+            return
+        }
+        joinCodeText = RemoteJoinCode.formatted(code)
+        startRemoteJoin(with: code)
+    }
+
+    private func startRemoteJoin(with code: String) {
+        cancelRemoteJoinAttempt()
+        isJoiningRemote = true
+        sessionManager.lastError = nil
+        remoteJoinTask = Task { @MainActor in
+            let ok = await viewModel.joinWithRemoteCode(code)
+            isJoiningRemote = false
+            remoteJoinTask = nil
+            if ok {
+                dismiss()
+            } else if sessionManager.connectionState == .idle {
+                viewModel.beginJoining()
+            }
+        }
+    }
+
+    private func cancelRemoteJoinAttempt() {
+        remoteJoinTask?.cancel()
+        remoteJoinTask = nil
+        isJoiningRemote = false
+    }
 }
+
+#if os(iOS)
+private struct JoinQRScannerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onCode: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            SessionJoinQRScannerView(isScanningEnabled: true) { code in
+                onCode(code)
+            }
+            .ignoresSafeArea()
+            .navigationTitle(String(localized: "Scan QR"))
+            .platformInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Cancel")) { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+#endif

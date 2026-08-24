@@ -56,7 +56,7 @@ enum DrumMIDILoopPack: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .worship: String(localized: "Ballad → gospel builds, soft intros")
         case .latin: String(localized: "Merengue, salsa, songó, bachata, cumbia")
-        case .funkPop: String(localized: "Pocket funk and driving pop/rock")
+        case .funkPop: String(localized: "Pocket funk, pop/rock, jazz & blues")
         case .urban: String(localized: "Hip-hop, trap, dembow, disco")
         case .world: String(localized: "Reggae, afrobeat, country train")
         }
@@ -67,8 +67,8 @@ enum DrumMIDILoopPack: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .worship: [.worshipBallad, .softPulse, .gospelGroove, .brushWaltz]
         case .latin: [.merengue, .salsa, .songo, .bossaNova, .bolero, .bachata, .cumbia, .chaCha, .soca]
-        case .funkPop: [.funkGroove, .popRock, .rockDrive, .rbSoul, .edmPulse, .halfTimeRock, .discoFour]
-        case .urban: [.hipHopBoomBap, .trapHalftime, .dembow]
+        case .funkPop: [.funkGroove, .popRock, .rockDrive, .rbSoul, .edmPulse, .halfTimeRock, .jazzSwing, .bluesShuffle]
+        case .urban: [.hipHopBoomBap, .trapHalftime, .dembow, .discoFour]
         case .world: [.reggaeOneDrop, .afrobeat, .countryTrain]
         }
     }

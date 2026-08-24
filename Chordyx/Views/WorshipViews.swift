@@ -4,7 +4,9 @@
 //
 
 import SwiftUI
-import MultipeerConnectivity
+#if os(iOS)
+import CoreAudioKit
+#endif
 #if canImport(PDFKit)
 import PDFKit
 #endif
@@ -12,7 +14,7 @@ import PDFKit
 // MARK: - Stage display
 
 struct NotationCycleButton: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var isGuest: Bool
 
     private var notation: ChordNotation {
@@ -58,7 +60,7 @@ struct NotationCycleButton: View {
 }
 
 struct StageDisplayView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var isGuest: Bool = false
     var guestTranspose: Int = 0
     var guestCapo: Int = 0
@@ -170,7 +172,7 @@ struct StageDisplayView: View {
 // MARK: - Lyrics chart
 
 struct LyricsChartView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var isGuest: Bool = false
     var guestTranspose: Int = 0
     var guestCapo: Int = 0
@@ -384,7 +386,7 @@ struct LiveCueBanner: View {
 }
 
 struct LiveCuePad: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     var usesWideLayout = false
     var style: Style = .grid
 
@@ -465,7 +467,9 @@ struct LiveCuePad: View {
         switch text {
         case "Hold": viewModel.payload.isAutoAdvancePaused
         case "Vamp": viewModel.payload.isVampActive
-        default: false
+        case "Drums out":
+            false
+        default: viewModel.payload.activeCue?.text == text
         }
     }
 }
@@ -473,7 +477,7 @@ struct LiveCuePad: View {
 // MARK: - Section jumps
 
 struct SectionJumpBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -584,7 +588,7 @@ struct GuestMusicianSettingsView: View {
     @State private var beatHints = GuestDisplaySettings.beatSyncHintsEnabled
     @State private var acousticRoom = GuestDisplaySettings.acousticRoomMode
     @State private var stageMonitor = GuestDisplaySettings.stageMonitorMode
-    @State private var liveNowOnly = GuestDisplaySettings.liveNowOnlyMode
+    @State private var liveViewStyle = GuestDisplaySettings.liveViewStyle
     @State private var beginnerPianoTriads = GuestDisplaySettings.beginnerPianoTriadsEnabled
     @State private var haptics = GuestDisplaySettings.watchHapticsEnabled
     @State private var cueHaptics = GuestDisplaySettings.cueHapticsEnabled
@@ -619,7 +623,10 @@ struct GuestMusicianSettingsView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                 }
                 Section("Stage Tools") {
-                    Toggle(String(localized: "Live Now view (current chord only)"), isOn: $liveNowOnly)
+                    GuestLiveViewStylePicker(style: $liveViewStyle)
+                    Text(String(localized: "Ring = full progression. Now = current chord only. Clock = watch-face dial (iPhone)."))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.textSecondary)
                     Toggle(String(localized: "Beginner piano triads"), isOn: $beginnerPianoTriads)
                     Text(String(localized: "On piano view, show only major/minor triads from the host MIDI (Cmaj9 → C, Cm9 → Cm)."))
                         .font(.caption)
@@ -725,7 +732,7 @@ struct GuestMusicianSettingsView: View {
                         GuestDisplaySettings.beatSyncHintsEnabled = beatHints
                         GuestDisplaySettings.acousticRoomMode = acousticRoom
                         GuestDisplaySettings.stageMonitorMode = stageMonitor
-                        GuestDisplaySettings.liveNowOnlyMode = liveNowOnly
+                        GuestDisplaySettings.liveViewStyle = liveViewStyle
                         GuestDisplaySettings.beginnerPianoTriadsEnabled = beginnerPianoTriads
                         GuestDisplaySettings.watchHapticsEnabled = haptics
                         GuestDisplaySettings.cueHapticsEnabled = cueHaptics
@@ -836,7 +843,10 @@ struct ChromaticToneNamesSettingsView: View {
 
 struct MIDISettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
+    #if os(iOS)
+    @State private var showBluetoothMIDI = false
+    #endif
 
     private var advancePedalLabel: String {
         let note = viewModel.midi.advanceTriggerNote
@@ -861,7 +871,7 @@ struct MIDISettingsView: View {
 
                 Section("MIDI Sources") {
                     if viewModel.midiAvailableSources.isEmpty {
-                        Text("No MIDI sources detected")
+                        Text("No MIDI sources detected. Plug in a USB controller, then tap Rescan. Bluetooth devices need to be paired first.")
                             .foregroundStyle(AppTheme.textSecondary)
                     } else {
                         ForEach(viewModel.midiAvailableSources) { source in
@@ -874,6 +884,14 @@ struct MIDISettingsView: View {
                     Button("Connect All Sources") {
                         viewModel.midiConnectAllSources()
                     }
+                    Button("Rescan MIDI Devices") {
+                        viewModel.rescanMIDISources()
+                    }
+                    #if os(iOS)
+                    Button("Bluetooth MIDI…") {
+                        showBluetoothMIDI = true
+                    }
+                    #endif
                 }
 
                 Section("Foot Pedal Notes") {
@@ -907,10 +925,31 @@ struct MIDISettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .onAppear {
+                viewModel.rescanMIDISources()
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showBluetoothMIDI, onDismiss: {
+                viewModel.rescanMIDISources()
+            }) {
+                BluetoothMIDIBrowser()
+                    .ignoresSafeArea()
+            }
+            #endif
         }
         .preferredColorScheme(.dark)
     }
 }
+
+#if os(iOS)
+private struct BluetoothMIDIBrowser: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> CABTMIDICentralViewController {
+        CABTMIDICentralViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: CABTMIDICentralViewController, context: Context) {}
+}
+#endif
 
 // MARK: - Setlist transition
 
@@ -995,7 +1034,7 @@ struct PDFChartView: View {
 // MARK: - Co-host picker
 
 struct CoHostPicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @State private var isMenuPresented = false
 
     var body: some View {
@@ -1022,7 +1061,7 @@ struct CoHostPicker: View {
                 minWidth: 260
             ) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(viewModel.sessionManager.connectedPeers, id: \.displayName) { peer in
+                    ForEach(viewModel.sessionManager.connectedPeerReferences) { peer in
                         LiquidGlassMenuRow(
                             title: String(format: String(localized: "Pass control to %@"), peer.displayName),
                             icon: "person.badge.key.fill"
@@ -1050,7 +1089,7 @@ struct CoHostPicker: View {
 // MARK: - Advance controls
 
 struct ChordAdvanceBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1078,7 +1117,7 @@ struct ChordAdvanceBar: View {
 
 /// Prev/next chord transport for live performance — sits in the bottom deck, not over the ring.
 struct LiveChordTransportCompact: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     private var sortedChords: [ChordEntry] { viewModel.sortedChords }
     private var activeIndex: Int? {
@@ -1131,7 +1170,7 @@ struct LiveChordTransportCompact: View {
 
 /// Combined progression position + prev/next for live host thumb workflow.
 struct LiveChordTransportBar: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     private var sortedChords: [ChordEntry] { viewModel.sortedChords }
     private var activeIndex: Int? {
@@ -1234,15 +1273,17 @@ struct RingSourcePicker: View {
     }
 }
 
-/// Guest control during Live sessions: full ring vs current chord only.
+/// Guest control during Live sessions: Ring / Now / Clock (Clock on iPhone).
 struct GuestLiveViewStylePicker: View {
-    @Binding var nowOnly: Bool
+    @Binding var style: GuestLiveViewStyle
 
     var body: some View {
-        PlatformSegmentedPicker("View", selection: $nowOnly, options: [
-            (false, "Ring"),
-            (true, "Now")
-        ])
+        PlatformSegmentedPicker(
+            "View",
+            selection: $style,
+            equalWidth: true,
+            options: GuestLiveViewStyle.pickerCases.map { ($0, LocalizedStringKey($0.label)) }
+        )
         .accessibilityLabel(String(localized: "Live view style"))
     }
 }
@@ -1250,7 +1291,7 @@ struct GuestLiveViewStylePicker: View {
 // MARK: - Display mode picker
 
 struct SessionDisplayModePicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         PlatformSegmentedPicker(
@@ -1259,13 +1300,14 @@ struct SessionDisplayModePicker: View {
                 get: { viewModel.payload.displayMode },
                 set: { viewModel.setDisplayMode($0) }
             ),
+            equalWidth: false,
             options: SessionDisplayMode.allCases.map { ($0, LocalizedStringKey($0.label)) }
         )
     }
 }
 
 struct SessionDisplayModeMenu<Label: View>: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @ViewBuilder var label: () -> Label
 
     var body: some View {
@@ -1283,7 +1325,7 @@ struct SessionDisplayModeMenu<Label: View>: View {
 }
 
 struct PerformanceModePicker: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
 
     var body: some View {
         PlatformSegmentedPicker(
@@ -1292,6 +1334,7 @@ struct PerformanceModePicker: View {
                 get: { viewModel.payload.performanceMode },
                 set: { viewModel.setPerformanceMode($0) }
             ),
+            equalWidth: false,
             options: SessionPerformanceMode.allCases.map { ($0, LocalizedStringKey($0.label)) }
         )
     }

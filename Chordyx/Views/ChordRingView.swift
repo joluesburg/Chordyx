@@ -173,6 +173,8 @@ struct CurrentChordDisplay: View {
     var preferInstantActiveChanges: Bool = false
     /// When set, scales typography and gradient to fit the allotted center circle.
     var diameter: CGFloat? = nil
+    /// When set, replaces the fallback "Key of X" caption (Auto-key uses this to avoid leaking C/E while listening).
+    var keyCaption: String? = nil
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var effectiveDiameter: CGFloat {
@@ -269,7 +271,7 @@ struct CurrentChordDisplay: View {
                         .background(AppTheme.surface.opacity(0.7))
                         .clipShape(Capsule())
                     } else {
-                        Text("Key of \(displayKey.displayName)")
+                        Text(keyCaption ?? "Key of \(notation.cycleGlyph(for: displayKey))")
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(AppTheme.textSecondary)
                     }

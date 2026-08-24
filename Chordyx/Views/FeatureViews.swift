@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import MultipeerConnectivity
 import UniformTypeIdentifiers
 
 // MARK: - Section map
@@ -90,17 +89,17 @@ struct PianoChartMismatchBanner: View {
 // MARK: - Guest role assignment (host)
 
 struct GuestRoleAssignmentView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
-                if viewModel.sessionManager.connectedPeers.isEmpty {
+                if viewModel.sessionManager.connectedPeerReferences.isEmpty {
                     Text(String(localized: "Waiting for musicians to connect…"))
                         .foregroundStyle(AppTheme.textSecondary)
                 } else {
-                    ForEach(viewModel.sessionManager.connectedPeers, id: \.displayName) { peer in
+                    ForEach(viewModel.sessionManager.connectedPeerReferences) { peer in
                         HStack {
                             Text(peer.displayName)
                             Spacer()
@@ -141,7 +140,7 @@ struct GuestRoleAssignmentView: View {
 // MARK: - Service templates
 
 struct ServiceTemplatePickerView: View {
-    @Bindable var store: ProgressionStore
+    @ObservedObject var store: ProgressionStore
     var onSelect: (ServiceTemplate) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var templates: [ServiceTemplate] = []
@@ -242,7 +241,7 @@ struct PracticeStatsView: View {
 // MARK: - Rehearsal recordings
 
 struct RehearsalRecordingsView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var recordings = RehearsalTimelineStore.shared.loadAll()
 
@@ -292,8 +291,8 @@ struct RehearsalRecordingsView: View {
 // MARK: - Session feature menu (host)
 
 struct SessionFeaturesMenu: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     @Binding var showGuestRoles: Bool
     @Binding var showRehearsalList: Bool
     @Binding var showJoinQR: Bool
@@ -335,8 +334,8 @@ struct SessionFeaturesMenu: View {
 }
 
 private struct SessionFeaturesPanel: View {
-    @Bindable var viewModel: SessionViewModel
-    @Bindable var store: ProgressionStore
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var store: ProgressionStore
     @Binding var showGuestRoles: Bool
     @Binding var showRehearsalList: Bool
     @Binding var showJoinQR: Bool
@@ -454,7 +453,7 @@ private struct SessionFeaturesPanel: View {
                 onDismiss()
             }
 
-            if let peer = viewModel.sessionManager.connectedPeers.first {
+            if let peer = viewModel.sessionManager.connectedPeerReferences.first {
                 LiquidGlassMenuRow(
                     title: String(localized: "Offer Host Handoff"),
                     icon: "arrow.triangle.2.circlepath"
@@ -471,7 +470,7 @@ private struct SessionFeaturesPanel: View {
 
 struct SetlistExportSheet: View {
     let setlist: Setlist
-    @Bindable var store: ProgressionStore
+    @ObservedObject var store: ProgressionStore
     @Environment(\.dismiss) private var dismiss
     @State private var exportURL: URL?
     @State private var errorMessage: String?
@@ -529,7 +528,7 @@ struct SetlistExportSheet: View {
 // MARK: - Stage display shell (projector)
 
 struct StageDisplayShellView: View {
-    @Bindable var viewModel: SessionViewModel
+    @ObservedObject var viewModel: SessionViewModel
     let isGuest: Bool
 
     var body: some View {
@@ -540,7 +539,7 @@ struct StageDisplayShellView: View {
 
 #if os(iOS)
 struct MetronomeRouteToggle: View {
-    @Bindable var metronome: MetronomeEngine
+    @ObservedObject var metronome: MetronomeEngine
 
     var body: some View {
         Toggle(String(localized: "Headphone click"), isOn: Binding(
