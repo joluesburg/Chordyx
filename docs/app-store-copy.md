@@ -30,10 +30,10 @@ Alternatives:
 ## Promotional text (170 chars, editable anytime)
 
 **EN:**
-> Host a session on your iPad. Your band sees the chord ring update in real time — metronome, cues, and setlists included. Same Wi‑Fi. No subscription required for beta.
+> Host a session on your iPad. Your band sees the chord ring update in real time — metronome, cues, and setlists included. Same Wi‑Fi, optional Internet join code.
 
 **ES:**
-> Haz de host en tu iPad. Tu banda ve el anillo de acordes al instante — metrónomo, señales y setlists incluidos. Misma Wi‑Fi. Sin suscripción en la beta.
+> Haz de host en tu iPad. Tu banda ve el anillo de acordes al instante — metrónomo, señales y setlists incluidos. Misma Wi‑Fi; código de unión por Internet opcional.
 
 ---
 
