@@ -2,11 +2,13 @@
 //  LiquidGlassMenus.swift
 //  Chordyx
 //
+//  Liquid Glass menus and sheets — iOS 27 presentation chrome.
+//
 
 import SwiftUI
 
 enum LiquidGlassMenuMetrics {
-    static let cornerRadius: CGFloat = 16
+    static let cornerRadius: CGFloat = AppTheme.Radius.chip + 4
 }
 
 struct LiquidGlassMenuRow: View {
@@ -59,6 +61,7 @@ struct LiquidGlassMenuSheet<Content: View>: View {
                 content()
                     .padding(.vertical, 8)
             }
+            .platformScrollEdgeEffect()
             .navigationTitle(title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -73,8 +76,9 @@ struct LiquidGlassMenuSheet<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppTheme.background)
+        .appShellBackground()
         .preferredColorScheme(.dark)
+        .liquidGlassSheetBackground()
         #if os(iOS)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -84,16 +88,9 @@ struct LiquidGlassMenuSheet<Content: View>: View {
 
 extension View {
     func liquidGlassPopoverPanel(minWidth: CGFloat = 220) -> some View {
-        Group {
-            if #available(iOS 26.0, macOS 26.0, *) {
-                panelContent(minWidth: minWidth)
-                    .glassEffect(.regular, in: .rect(cornerRadius: LiquidGlassMenuMetrics.cornerRadius, style: .continuous))
-            } else {
-                panelContent(minWidth: minWidth)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: LiquidGlassMenuMetrics.cornerRadius, style: .continuous))
-            }
-        }
-        .preferredColorScheme(.dark)
+        panelContent(minWidth: minWidth)
+            .modifier(LiquidGlassSurfaceModifier(cornerRadius: LiquidGlassMenuMetrics.cornerRadius, tintOpacity: 0.45))
+            .preferredColorScheme(.dark)
     }
 
     private func panelContent(minWidth: CGFloat) -> some View {
@@ -103,7 +100,7 @@ extension View {
 
     func liquidGlassPopoverChrome(clearBackground: Bool = false) -> some View {
         preferredColorScheme(.dark)
-            .background(clearBackground ? Color.clear : AppTheme.background)
+            .background(clearBackground ? Color.clear : AppTheme.background.opacity(0.01))
     }
 
     @ViewBuilder
@@ -126,6 +123,7 @@ extension View {
             }
             .frame(maxHeight: maxPopoverHeight)
             .scrollBounceBehavior(.basedOnSize)
+            .platformScrollEdgeEffect()
             .liquidGlassPopoverPanel(minWidth: minWidth)
             .liquidGlassPopoverChrome()
         }

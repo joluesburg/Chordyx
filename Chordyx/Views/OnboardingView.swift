@@ -22,7 +22,7 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.backgroundGradient.ignoresSafeArea()
+            Color.clear.appShellBackground()
 
             VStack(spacing: 24) {
                 TabView(selection: $page) {
@@ -45,12 +45,8 @@ struct OnboardingView: View {
                         finish()
                     }
                 }
-                .font(.headline)
-                .foregroundStyle(AppTheme.background)
+                .buttonStyle(.chordyxProminent)
                 .frame(maxWidth: 320)
-                .padding(.vertical, 16)
-                .background(AppTheme.accent)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
             }

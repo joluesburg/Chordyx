@@ -152,11 +152,11 @@ struct StageDisplayView: View {
 
             if viewModel.displayedMetronomePlaying {
                 HStack(spacing: 6) {
-                    ForEach(0..<max(1, viewModel.payload.beatsPerBar), id: \.self) { index in
-                        Circle()
-                            .fill(viewModel.metronome.currentBeat == index ? AppTheme.accent : AppTheme.chordInactive)
-                            .frame(width: 10, height: 10)
-                    }
+                    MetronomeBeatDotsRow(
+                        metronome: viewModel.metronome,
+                        beatsPerBar: max(1, viewModel.payload.beatsPerBar),
+                        isPlaying: true
+                    )
                     Text(TempoMarking.caption(for: viewModel.displayedSessionTempoBPM))
                         .font(.caption.weight(.medium))
                         .foregroundStyle(AppTheme.textSecondary)
@@ -271,9 +271,11 @@ struct LyricsChartView: View {
             .onChange(of: viewModel.payload.beatsOnActiveChord) { _, _ in
                 scrollToActiveLine(in: proxy, animated: autoScrollEnabled)
             }
-            .onChange(of: viewModel.metronome.currentBeat) { _, newBeat in
-                guard autoScrollEnabled, newBeat == 0 else { return }
-                scrollToActiveLine(in: proxy, animated: true)
+            .background {
+                MetronomeBeatChangeObserver(metronome: viewModel.metronome) { newBeat in
+                    guard autoScrollEnabled, newBeat == 0 else { return }
+                    scrollToActiveLine(in: proxy, animated: true)
+                }
             }
         }
     }

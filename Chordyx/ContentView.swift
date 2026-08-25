@@ -59,10 +59,13 @@ struct ContentView: View {
     /// No nested gradients / brand mark — those ran on the same stack as launch.
     private var launchPlaceholder: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            Text("Chordyx")
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+            Color.clear.appShellBackground()
+            VStack(spacing: 16) {
+                ChordyxBrandMark(size: 72, glowOpacity: 0.6)
+                Text("Chordyx")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
         }
     }
 

@@ -292,177 +292,121 @@ struct RehearsalRecordingsView: View {
 
 struct SessionFeaturesMenu: View {
     @ObservedObject var viewModel: SessionViewModel
-    @ObservedObject var store: ProgressionStore
     @Binding var showGuestRoles: Bool
     @Binding var showRehearsalList: Bool
     @Binding var showJoinQR: Bool
     @Binding var showExtendedFeaturesHub: Bool
     @Binding var showAdvancedFeaturesHub: Bool
     var showBandChat: Binding<Bool>? = nil
-    @State private var isPresented = false
 
     var body: some View {
-        Button {
-            isPresented = true
+        Menu {
+            if let showBandChat {
+                Button {
+                    showBandChat.wrappedValue = true
+                } label: {
+                    Label(String(localized: "Band chat"), systemImage: "bubble.left.and.bubble.right.fill")
+                }
+            }
+
+            Button {
+                showExtendedFeaturesHub = true
+            } label: {
+                Label(String(localized: "Band tools hub"), systemImage: "square.grid.2x2")
+            }
+
+            Button {
+                showAdvancedFeaturesHub = true
+            } label: {
+                Label(String(localized: "Advanced tools"), systemImage: "sparkles")
+            }
+
+            Button {
+                viewModel.setDirectorMode()
+            } label: {
+                Label(String(localized: "Director mode"), systemImage: "rectangle.inset.filled")
+            }
+
+            Button {
+                viewModel.setAudienceMode()
+            } label: {
+                Label(String(localized: "Audience display"), systemImage: "tv")
+            }
+
+            Button {
+                viewModel.toggleRehearsalRecording()
+            } label: {
+                Label(
+                    viewModel.isRecordingRehearsal
+                        ? String(localized: "Stop Recording")
+                        : String(localized: "Record Rehearsal"),
+                    systemImage: viewModel.isRecordingRehearsal ? "stop.circle" : "record.circle"
+                )
+            }
+
+            Button {
+                showRehearsalList = true
+            } label: {
+                Label(String(localized: "Replay Recordings"), systemImage: "play.rectangle.on.rectangle")
+            }
+
+            Button {
+                showGuestRoles = true
+            } label: {
+                Label(String(localized: "Assign Role Presets"), systemImage: "person.3")
+            }
+
+            Button {
+                viewModel.toggleStageDisplayOnly()
+            } label: {
+                Label(
+                    viewModel.payload.isStageDisplayOnly
+                        ? String(localized: "Exit Stage Display")
+                        : String(localized: "Stage Display Mode"),
+                    systemImage: "tv"
+                )
+            }
+
+            if viewModel.payload.remoteJoinCode != nil, viewModel.payload.isRemoteBackupEnabled {
+                if let code = viewModel.payload.remoteJoinCode {
+                    Button {
+                        RemoteJoinCode.copyToClipboard(code)
+                    } label: {
+                        Label(String(localized: "Copy Join Code"), systemImage: "doc.on.doc")
+                    }
+                }
+                Button {
+                    showJoinQR = true
+                } label: {
+                    Label(String(localized: "Show Join QR"), systemImage: "qrcode")
+                }
+            }
+
+            Button {
+                viewModel.toggleMIDICueOut(!viewModel.payload.isMIDICueOutEnabled)
+            } label: {
+                Label(
+                    viewModel.payload.isMIDICueOutEnabled
+                        ? String(localized: "MIDI Cues On")
+                        : String(localized: "MIDI Cues Off"),
+                    systemImage: "pianokeys.inverse"
+                )
+            }
+
+            if let peer = viewModel.sessionManager.connectedPeerReferences.first {
+                Button {
+                    viewModel.requestHostHandoff(to: peer)
+                } label: {
+                    Label(String(localized: "Offer Host Handoff"), systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.title2)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(AppTheme.textPrimary)
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "Session features"))
-        .liquidGlassMenuPresentation(
-            isPresented: $isPresented,
-            sheetTitle: "Session features",
-            arrowEdge: .bottom,
-            minWidth: 280
-        ) {
-            SessionFeaturesPanel(
-                viewModel: viewModel,
-                store: store,
-                showGuestRoles: $showGuestRoles,
-                showRehearsalList: $showRehearsalList,
-                showJoinQR: $showJoinQR,
-                showExtendedFeaturesHub: $showExtendedFeaturesHub,
-                showAdvancedFeaturesHub: $showAdvancedFeaturesHub,
-                showBandChat: showBandChat,
-                onDismiss: { isPresented = false }
-            )
-        }
-    }
-}
-
-private struct SessionFeaturesPanel: View {
-    @ObservedObject var viewModel: SessionViewModel
-    @ObservedObject var store: ProgressionStore
-    @Binding var showGuestRoles: Bool
-    @Binding var showRehearsalList: Bool
-    @Binding var showJoinQR: Bool
-    @Binding var showExtendedFeaturesHub: Bool
-    @Binding var showAdvancedFeaturesHub: Bool
-    var showBandChat: Binding<Bool>?
-    let onDismiss: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let showBandChat {
-                LiquidGlassMenuRow(
-                    title: String(localized: "Band chat"),
-                    icon: "bubble.left.and.bubble.right.fill"
-                ) {
-                    onDismiss()
-                    Task { @MainActor in showBandChat.wrappedValue = true }
-                }
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Band tools hub"),
-                icon: "square.grid.2x2"
-            ) {
-                onDismiss()
-                Task { @MainActor in showExtendedFeaturesHub = true }
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Advanced tools"),
-                icon: "sparkles"
-            ) {
-                onDismiss()
-                Task { @MainActor in showAdvancedFeaturesHub = true }
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Director mode"),
-                icon: "rectangle.inset.filled"
-            ) {
-                viewModel.setDirectorMode()
-                onDismiss()
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Audience display"),
-                icon: "tv"
-            ) {
-                viewModel.setAudienceMode()
-                onDismiss()
-            }
-
-            LiquidGlassMenuRow(
-                title: viewModel.isRecordingRehearsal
-                    ? String(localized: "Stop Recording")
-                    : String(localized: "Record Rehearsal"),
-                icon: viewModel.isRecordingRehearsal ? "stop.circle" : "record.circle"
-            ) {
-                viewModel.toggleRehearsalRecording()
-                onDismiss()
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Replay Recordings"),
-                icon: "play.rectangle.on.rectangle"
-            ) {
-                onDismiss()
-                Task { @MainActor in showRehearsalList = true }
-            }
-
-            LiquidGlassMenuRow(
-                title: String(localized: "Assign Role Presets"),
-                icon: "person.3"
-            ) {
-                onDismiss()
-                Task { @MainActor in showGuestRoles = true }
-            }
-
-            LiquidGlassMenuRow(
-                title: viewModel.payload.isStageDisplayOnly
-                    ? String(localized: "Exit Stage Display")
-                    : String(localized: "Stage Display Mode"),
-                icon: "tv"
-            ) {
-                viewModel.toggleStageDisplayOnly()
-                onDismiss()
-            }
-
-            if viewModel.payload.remoteJoinCode != nil, viewModel.payload.isRemoteBackupEnabled {
-                if let code = viewModel.payload.remoteJoinCode {
-                    LiquidGlassMenuRow(
-                        title: String(localized: "Copy Join Code"),
-                        icon: "doc.on.doc"
-                    ) {
-                        RemoteJoinCode.copyToClipboard(code)
-                        onDismiss()
-                    }
-                }
-                LiquidGlassMenuRow(
-                    title: String(localized: "Show Join QR"),
-                    icon: "qrcode"
-                ) {
-                    onDismiss()
-                    Task { @MainActor in showJoinQR = true }
-                }
-            }
-
-            LiquidGlassMenuRow(
-                title: viewModel.payload.isMIDICueOutEnabled
-                    ? String(localized: "MIDI Cues On")
-                    : String(localized: "MIDI Cues Off"),
-                icon: "pianokeys.inverse"
-            ) {
-                viewModel.toggleMIDICueOut(!viewModel.payload.isMIDICueOutEnabled)
-                onDismiss()
-            }
-
-            if let peer = viewModel.sessionManager.connectedPeerReferences.first {
-                LiquidGlassMenuRow(
-                    title: String(localized: "Offer Host Handoff"),
-                    icon: "arrow.triangle.2.circlepath"
-                ) {
-                    viewModel.requestHostHandoff(to: peer)
-                    onDismiss()
-                }
-            }
-        }
     }
 }
 

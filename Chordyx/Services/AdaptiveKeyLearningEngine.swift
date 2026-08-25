@@ -111,6 +111,13 @@ final class AdaptiveKeyLearningEngine {
             )
         }
 
+        // Church loop match after two repetitions — highest-confidence live path.
+        if WorshipAutoKeyRules.hasTwoLoopEvidence(normalized),
+           let worshipKey = WorshipAutoKeyRules.resolveKey(from: normalized),
+           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: worshipKey) {
+            return AdaptiveKeyDetection(key: worshipKey, confidence: 0.88, source: .ensemble)
+        }
+
         // Market-grade MIR ensemble (KS, Temperley, functions, fifths, templates, HMM).
         let intelligence = LiveKeyIntelligence.analyze(symbols: normalized)
         let heuristic = KeyDetector.detect(from: normalized)
@@ -126,6 +133,7 @@ final class AdaptiveKeyLearningEngine {
             // Chord intelligence leads; audio chroma + neural refine live lock.
             blended[key] = intel * 0.58 + h * 0.16 + n * 0.14 + a * 0.12
         }
+        WorshipAutoKeyRules.applyScoreBoost(symbols: normalized, into: &blended)
 
         if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
             liveSymbols: normalized,

@@ -18,6 +18,8 @@
 		<string>_chordyx._tcp</string>
 		<string>_chordyx._udp</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

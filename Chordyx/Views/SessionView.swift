@@ -452,7 +452,7 @@ struct SessionView: View {
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppTheme.backgroundGradient.ignoresSafeArea())
+        .appShellBackground()
         .platformDesktopControls()
         .onChange(of: viewModel.payload.isPianoActive) { _, isActive in
             // Host overlay tracks share state; guests keep Piano Keys open independently.
@@ -603,8 +603,10 @@ struct SessionView: View {
             .onChange(of: scenePhase) { _, phase in
                 handleScenePhaseChange(phase)
             }
-            .onChange(of: viewModel.metronome.currentBeat) { _, newBeat in
-                handleMetronomeBeatChange(newBeat)
+            .background {
+                MetronomeBeatChangeObserver(metronome: viewModel.metronome) { newBeat in
+                    handleMetronomeBeatChange(newBeat)
+                }
             }
     }
 
@@ -729,15 +731,7 @@ struct SessionView: View {
 
     @ViewBuilder
     private var countInOverlayContent: some View {
-        if isCountInActive, viewModel.metronome.countInBeatsRemaining > 0 {
-            CountInOverlay(
-                beatsRemaining: viewModel.metronome.countInBeatsRemaining,
-                beatInBar: max(0, viewModel.metronome.currentBeat),
-                beatsPerBar: viewModel.payload.beatsPerBar
-            )
-            .transition(.scale.combined(with: .opacity))
-            .allowsHitTesting(false)
-        }
+        CountInOverlayHost(viewModel: viewModel, isActive: isCountInActive)
     }
 
     @ViewBuilder
@@ -1130,7 +1124,7 @@ struct SessionView: View {
 
     private func sessionContent(stageHeight: CGFloat) -> some View {
         ZStack {
-            AppTheme.backgroundGradient.ignoresSafeArea()
+            Color.clear.appShellBackground()
 
             VStack(spacing: 0) {
                 if !viewModel.payload.sections.isEmpty {
@@ -2647,7 +2641,6 @@ struct SessionView: View {
             HStack {
                 SessionFeaturesMenu(
                     viewModel: viewModel,
-                    store: store,
                     showGuestRoles: $showGuestRoles,
                     showRehearsalList: $showRehearsalList,
                     showJoinQR: $showJoinQR,

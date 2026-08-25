@@ -345,6 +345,7 @@ struct BackingTrackStatusBanner: View {
 
 struct BackingTrackPanel: View {
     @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject private var backingTrack: BackingTrackEngine
     var onImport: () -> Void
     var style: Style = .standard
 
@@ -359,23 +360,30 @@ struct BackingTrackPanel: View {
     @State private var didApplyStyle = false
     @State private var isTrackMenuPresented = false
 
+    init(viewModel: SessionViewModel, onImport: @escaping () -> Void, style: Style = .standard) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _backingTrack = ObservedObject(wrappedValue: viewModel.backingTrack)
+        self.onImport = onImport
+        self.style = style
+    }
+
     private var trackTitle: String {
         viewModel.payload.backingTrackDisplayName.isEmpty
-            ? viewModel.backingTrack.displayName
+            ? backingTrack.displayName
             : viewModel.payload.backingTrackDisplayName
     }
 
     private var trackDuration: TimeInterval {
-        max(viewModel.backingTrack.duration, 0.01)
+        max(backingTrack.duration, 0.01)
     }
 
     private var displayedTime: TimeInterval {
-        isScrubbing ? scrubTime : viewModel.backingTrack.currentTime
+        isScrubbing ? scrubTime : backingTrack.currentTime
     }
 
     var body: some View {
         Group {
-            if viewModel.backingTrack.hasTrack || !viewModel.payload.backingTrackDisplayName.isEmpty {
+            if backingTrack.hasTrack || !viewModel.payload.backingTrackDisplayName.isEmpty {
                 if isExpanded {
                     expandedPlayer
                 } else {
@@ -452,11 +460,11 @@ struct BackingTrackPanel: View {
                 Button {
                     viewModel.toggleBackingTrack()
                 } label: {
-                    Image(systemName: viewModel.backingTrack.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    Image(systemName: backingTrack.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 44))
                         .foregroundStyle(AppTheme.accent)
                 }
-                .accessibilityLabel(viewModel.backingTrack.isPlaying
+                .accessibilityLabel(backingTrack.isPlaying
                                     ? String(localized: "Pause")
                                     : String(localized: "Play"))
 
@@ -482,13 +490,13 @@ struct BackingTrackPanel: View {
             Button {
                 viewModel.toggleBackingTrack()
             } label: {
-                Image(systemName: viewModel.backingTrack.isPlaying ? "pause.fill" : "play.fill")
+                Image(systemName: backingTrack.isPlaying ? "pause.fill" : "play.fill")
                     .font(.body.weight(.bold))
                     .frame(width: 36, height: 36)
                     .background(AppTheme.accent.opacity(0.18), in: Circle())
             }
             .foregroundStyle(AppTheme.accent)
-            .accessibilityLabel(viewModel.backingTrack.isPlaying
+            .accessibilityLabel(backingTrack.isPlaying
                                 ? String(localized: "Pause")
                                 : String(localized: "Play"))
 
@@ -589,7 +597,7 @@ struct BackingTrackPanel: View {
                 onEditingChanged: { editing in
                     isScrubbing = editing
                     if editing {
-                        scrubTime = viewModel.backingTrack.currentTime
+                        scrubTime = backingTrack.currentTime
                     } else {
                         viewModel.seekBackingTrack(to: scrubTime)
                     }
@@ -600,7 +608,7 @@ struct BackingTrackPanel: View {
             HStack {
                 Text(BackingTrackEngine.formatTime(displayedTime))
                 Spacer()
-                Text(BackingTrackEngine.formatTime(viewModel.backingTrack.duration))
+                Text(BackingTrackEngine.formatTime(backingTrack.duration))
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(AppTheme.textSecondary)
@@ -1084,7 +1092,7 @@ struct RecentSessionsSection: View {
                     }
                 }
                 .padding(12)
-                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .glassCard(cornerRadius: 14)
             }
         }
     }

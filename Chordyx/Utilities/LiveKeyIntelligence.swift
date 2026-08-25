@@ -56,6 +56,10 @@ enum LiveKeyIntelligence: Sendable {
         [5, 0, 7, 0],       // IV I V I
         [0, 2, 7, 0],       // I ii V I
         [9, 7, 0],          // vi V I
+        [7, 5, 0],          // V IV I (C Bb F → F, not C)
+        [5, 7, 0],          // IV V I
+        [0, 10, 8, 7],      // Andalusian i–bVII–bVI–V (minor tonic letter)
+        [9, 7, 5, 7],       // Am G F G → C
         [0, 10, 5, 7],      // I bVII IV V (mixolydish worship)
         [0, 5, 9, 7],       // I IV vi V
         [7, 0],             // V I

@@ -27,6 +27,9 @@ final class SessionViewModel: ObservableObject {
     /// Nested services are lazy — constructing them in `init` froze iPhone (EXC_BAD_ACCESS code=2).
     private var nestedCancellables = Set<AnyCancellable>()
 
+    /// Forwards nested `ObservableObject` updates to session UI.
+    /// Metronome and backing track publish every beat/tick — views that need them
+    /// observe those engines directly so the whole session tree does not re-render.
     private func forwardObjectWillChange(_ publisher: ObservableObjectPublisher) {
         publisher
             .sink { [weak self] _ in
@@ -45,16 +48,8 @@ final class SessionViewModel: ObservableObject {
         forwardObjectWillChange(relay.objectWillChange)
         return relay
     }()
-    lazy var metronome: MetronomeEngine = {
-        let engine = MetronomeEngine()
-        forwardObjectWillChange(engine.objectWillChange)
-        return engine
-    }()
-    lazy var backingTrack: BackingTrackEngine = {
-        let engine = BackingTrackEngine()
-        forwardObjectWillChange(engine.objectWillChange)
-        return engine
-    }()
+    lazy var metronome: MetronomeEngine = MetronomeEngine()
+    lazy var backingTrack: BackingTrackEngine = BackingTrackEngine()
     lazy var midi = MIDIInputManager()
     #if os(macOS) || os(iOS)
     lazy var livePerformanceFusion = LivePerformanceFusionEngine()
@@ -874,18 +869,32 @@ final class SessionViewModel: ObservableObject {
 
     private func handleMIDINotes(_ midiNotes: [Int]) {
         guard canDriveSession else { return }
-        let notes = midiNotes
-            .map { PianoNote.fromMIDINote($0) }
-            .filter { PianoNote.keyboardRange.contains($0) }
-            .sorted()
-        applyPianoNotes(notes)
+        let guitarMode = payload.livePlayInputMode == .guitar
+        let notes: [Int]
+        if guitarMode {
+            notes = midiNotes
+                .filter { Self.guitarMIDIRange.contains($0) }
+                .map { PianoNote.fromMIDINote($0) }
+                .sorted()
+        } else {
+            notes = midiNotes
+                .map { PianoNote.fromMIDINote($0) }
+                .filter { PianoNote.keyboardRange.contains($0) }
+                .sorted()
+        }
+        applyLivePlayNotes(notes)
     }
 
-    private func applyPianoNotes(_ indices: [Int]) {
+    /// Standard guitar MIDI note range (E1 … C7).
+    private static let guitarMIDIRange = 28...108
+
+    private func applyLivePlayNotes(_ indices: [Int]) {
         guard canDriveSession else { return }
+        let guitarMode = payload.livePlayInputMode == .guitar
         let notes = indices
             .map { PianoNote.normalizeToInternal($0) }
-            .filter { PianoNote.keyboardRange.contains($0) }
+            .filter { guitarMode || PianoNote.keyboardRange.contains($0) }
+            .sorted()
 
         let priorSymbol = payload.liveChordSymbol
         let priorNotes = payload.pianoNotes
@@ -913,6 +922,10 @@ final class SessionViewModel: ObservableObject {
         schedulePianoSideEffects(notes: notes)
     }
 
+    private func applyPianoNotes(_ indices: [Int]) {
+        applyLivePlayNotes(indices)
+    }
+
     /// Waits briefly while a chord is forming, and delays note-off sync so guests keep full chords.
     private func scheduleStabilizedPianoNotesSync(
         notes: [Int],
@@ -923,17 +936,18 @@ final class SessionViewModel: ObservableObject {
 
         let notesGrew = notes.count > priorNotes.count
         let notesShrank = notes.count < priorNotes.count
+        let guitarMode = payload.livePlayInputMode == .guitar
         let delayMs: UInt64
         if notes.isEmpty {
-            delayMs = 140
+            delayMs = guitarMode ? 160 : 140
         } else if notesGrew && notes.count < 3 {
-            delayMs = 55 // gather remaining chord tones from MIDI
+            delayMs = guitarMode ? 95 : 55 // gather strummed chord tones
         } else if notesShrank {
-            delayMs = 110 // ignore brief finger lifts
+            delayMs = guitarMode ? 150 : 110
         } else if priorSymbol != payload.liveChordSymbol {
-            delayMs = 20
+            delayMs = guitarMode ? 28 : 20
         } else {
-            delayMs = 35
+            delayMs = guitarMode ? 45 : 35
         }
 
         pianoNotesSyncTask = Task { @MainActor [weak self] in
@@ -950,8 +964,9 @@ final class SessionViewModel: ObservableObject {
 
     private func scheduleLiveChordSymbolClear() {
         liveChordSymbolClearTask?.cancel()
+        let holdMs: UInt64 = payload.livePlayInputMode == .guitar ? 550 : 400
         liveChordSymbolClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: .milliseconds(holdMs))
             guard let self, !Task.isCancelled else { return }
             guard self.payload.pianoNotes.isEmpty else { return }
             guard !self.payload.hasInferredLiveProgression else { return }
@@ -975,7 +990,12 @@ final class SessionViewModel: ObservableObject {
             self.updateLiveChordSymbol(from: currentNotes)
             guard let symbol = self.payload.liveChordSymbol else { return }
             let pcs = Set(currentNotes.map { PianoNote.pitchClass(forStored: $0) })
-            let isChord = KeyChordAnalysis.isChordVoicing(pitchClassCount: pcs.count, symbol: symbol)
+            let guitarMode = self.payload.livePlayInputMode == .guitar
+            let isChord = KeyChordAnalysis.contributesToLiveKeyEvidence(
+                symbol: symbol,
+                pitchClassCount: pcs.count,
+                guitarMode: guitarMode
+            )
             self.applyFreestyleSideEffects(for: symbol, contributesToKeyAndProgression: isChord)
             if self.payload.autoDetectKey, isChord {
                 self.maybeAutoDetectKey()
@@ -1014,10 +1034,18 @@ final class SessionViewModel: ObservableObject {
         }
 
         let preferFlats = payload.key.prefersFlats
+        let guitarMode = payload.livePlayInputMode == .guitar
         let symbol: String?
         if pitchClasses.count == 1, let pc = pitchClasses.first {
             let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
             symbol = names[pc]
+        } else if guitarMode {
+            symbol = ChordRecognizer.symbolForLiveGuitar(notes: indices, preferFlats: preferFlats)
+                ?? ChordRecognizer.symbol(
+                    forPitchClasses: pitchClasses,
+                    bassPitchClass: bass,
+                    preferFlats: preferFlats
+                )
         } else {
             // Two-hand analysis: LH root/bass + RH color (Sol + Fa maj → G, not F).
             var resolved = ChordRecognizer.symbolConsideringBothHands(
@@ -1034,7 +1062,6 @@ final class SessionViewModel: ObservableObject {
             if resolved == nil, let index = indices.min() {
                 resolved = singleNoteSymbol(for: index)
             }
-            // If a candidate still conflicts with an octave bass shell, reconcile to the voicing.
             resolved = ChordRecognizer.reconcileSymbolWithVoicing(
                 notes: indices,
                 chordSymbol: resolved,
@@ -1043,6 +1070,35 @@ final class SessionViewModel: ObservableObject {
             symbol = resolved
         }
         payload.liveChordSymbol = symbol
+    }
+
+    /// Host taps a chord on the live pad (acoustic guitar without pickup, or quick broadcast).
+    func broadcastLiveChord(_ symbol: String) {
+        guard canDriveSession else { return }
+        let normalized = LiveRing.normalize(symbol.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !normalized.isEmpty else { return }
+
+        liveChordSymbolClearTask?.cancel()
+        liveChordSymbolClearTask = nil
+        pianoNotesSyncTask?.cancel()
+        pianoNotesSyncTask = nil
+
+        payload.liveChordSymbol = normalized
+        payload.pianoNotes = []
+
+        applyFreestyleSideEffects(for: normalized, contributesToKeyAndProgression: true)
+        updatePianoChartMismatch()
+        lastSyncedLiveChordSymbol = normalized
+        lastSyncedPianoNotes = []
+        syncLiveImmediate()
+    }
+
+    /// Chord symbols shown on the host live pad (chart → ring → key diatonic defaults).
+    var liveChordPadSymbols: [String] {
+        let chart = sortedChords.map(\.symbolName).filter { !$0.isEmpty }
+        if !chart.isEmpty { return chart }
+        if !payload.freestyleChordSymbols.isEmpty { return payload.freestyleChordSymbols }
+        return LiveChordPadDefaults.diatonicChords(in: payload.key)
     }
 
     private func applyFreestyleSideEffects(for symbol: String, contributesToKeyAndProgression: Bool = true) {
@@ -1712,7 +1768,8 @@ final class SessionViewModel: ObservableObject {
             name: String,
             key: MusicalKey,
             notation: ChordNotation,
-            autoDetectKey: Bool
+            autoDetectKey: Bool,
+            inputMode: LivePlayInputMode
         )
     }
 
@@ -1760,12 +1817,13 @@ final class SessionViewModel: ObservableObject {
                 performanceMode: performanceMode,
                 autoDetectKey: autoDetectKey
             )
-        case let .liveChords(name, key, notation, autoDetectKey):
+        case let .liveChords(name, key, notation, autoDetectKey, inputMode):
             hostLiveChordsSession(
                 name: name,
                 key: key,
                 notation: notation,
-                autoDetectKey: autoDetectKey
+                autoDetectKey: autoDetectKey,
+                inputMode: inputMode
             )
         }
     }
@@ -1797,6 +1855,7 @@ final class SessionViewModel: ObservableObject {
         key: MusicalKey,
         notation: ChordNotation,
         autoDetectKey: Bool,
+        inputMode: LivePlayInputMode = ChordyxPreferences.defaultLivePlayInputMode,
         libraryStore: ProgressionStore
     ) {
         preparePendingHostStart(
@@ -1804,7 +1863,8 @@ final class SessionViewModel: ObservableObject {
                 name: name,
                 key: key,
                 notation: notation,
-                autoDetectKey: autoDetectKey
+                autoDetectKey: autoDetectKey,
+                inputMode: inputMode
             ),
             libraryStore: libraryStore
         )
@@ -1851,12 +1911,13 @@ final class SessionViewModel: ObservableObject {
         completeHostActivationIfNeeded()
     }
 
-    /// Host a freestyle session — guests see only the current live chord (piano/MIDI), with no next-chord preview.
+    /// Host a freestyle session — guests see only the current live chord (MIDI / tap pad), with no next-chord preview.
     func hostLiveChordsSession(
         name: String,
         key: MusicalKey,
         notation: ChordNotation,
-        autoDetectKey: Bool = true
+        autoDetectKey: Bool = true,
+        inputMode: LivePlayInputMode = ChordyxPreferences.defaultLivePlayInputMode
     ) {
         isPracticeMode = false
         activeSetlist = nil
@@ -1871,6 +1932,7 @@ final class SessionViewModel: ObservableObject {
         payload.performanceMode = .live
         payload.displayMode = .stage
         payload.isLiveChordsOnly = true
+        payload.livePlayInputMode = inputMode
         payload.autoDetectKey = autoDetectKey
         payload.isKeyAutoDetected = false
         payload.isRemoteBackupEnabled = UserDefaults.standard.object(forKey: Self.remoteBackupDefaultsKey) as? Bool ?? true
@@ -3218,14 +3280,14 @@ final class SessionViewModel: ObservableObject {
 
     func applyMetronome() {
         #if os(iOS)
-        var bpm = displayedSessionTempoBPM
+        let bpm = displayedSessionTempoBPM
         let isPlaying = displayedMetronomePlaying
         #else
-        var bpm = payload.tempoBPM
+        let bpm = payload.tempoBPM
         let isPlaying = payload.isMetronomePlaying
         #endif
-        var beatsPerBar = max(1, payload.beatsPerBar)
-        var beatUnit = max(1, payload.beatUnit)
+        let beatsPerBar = max(1, payload.beatsPerBar)
+        let beatUnit = max(1, payload.beatUnit)
         metronome.apply(
             bpm: bpm,
             beatsPerBar: beatsPerBar,

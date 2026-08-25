@@ -36,6 +36,9 @@ struct PreferencesHubView: View {
                     shortcutsSection
                 }
             }
+            .scrollContentBackground(.hidden)
+            .appShellBackground()
+            .platformScrollEdgeEffect()
             .navigationTitle(String(localized: "Preferences"))
             .platformInlineNavigationTitle()
             .toolbar {

@@ -115,6 +115,35 @@ nonisolated enum MusicalKey: String, Codable, CaseIterable, Identifiable, Sendab
     }
 }
 
+/// How the host drives live chord symbols (piano keys vs guitar MIDI / tap pad).
+nonisolated enum LivePlayInputMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case piano
+    case guitar
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .piano: String(localized: "Piano / keys")
+        case .guitar: String(localized: "Guitar")
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .piano: String(localized: "Piano or MIDI keyboard")
+        case .guitar: String(localized: "MIDI pickup or tap pad")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .piano: "pianokeys"
+        case .guitar: "guitars"
+        }
+    }
+}
+
 struct ChordEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
     let id: UUID
     let symbolName: String
@@ -360,6 +389,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     var remoteJoinCode: String?
     /// Freestyle session: broadcast the current live chord only (no progression, no next chord).
     var isLiveChordsOnly: Bool = false
+    /// Host live-play input: piano keyboard vs guitar MIDI pickup (synced so guests know the mode).
+    var livePlayInputMode: LivePlayInputMode = .piano
     /// Stable ID for reconnecting to the same session.
     var sessionToken: UUID = UUID()
     /// Repeat the active section until the host turns it off.
@@ -1248,6 +1279,43 @@ enum ChordRecognizer {
             return remembered
         }
         return resolved
+    }
+
+    /// Guitar MIDI / pickup: lowest note is bass; no piano hand-split.
+    static func symbolForLiveGuitar(notes: [Int], preferFlats: Bool) -> String? {
+        let normalized = notes
+            .map { PianoNote.normalizeToInternal($0) }
+            .sorted()
+        guard !normalized.isEmpty else { return nil }
+
+        let pitchClasses = Set(normalized.map { PianoNote.pitchClass(of: $0) })
+        let bass = normalized.min().map { PianoNote.pitchClass(of: $0) }
+        let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
+
+        if pitchClasses.count == 1, let pc = pitchClasses.first {
+            return names[pc]
+        }
+
+        if let symbol = symbol(
+            forPitchClasses: pitchClasses,
+            bassPitchClass: bass,
+            preferFlats: preferFlats
+        ) {
+            return symbol
+        }
+
+        // Common guitar dyads: root + fifth (power), root + minor/major third.
+        if pitchClasses.count == 2, let bassPC = bass {
+            let other = pitchClasses.subtracting([bassPC]).first
+            let interval = other.map { ($0 - bassPC + 12) % 12 }
+            switch interval {
+            case 7: return names[bassPC] + "5"
+            case 3: return names[bassPC] + "m"
+            case 4: return names[bassPC]
+            default: break
+            }
+        }
+        return nil
     }
 
     /// When a live label disagrees with the sounding bass octave shell, prefer the bass-rooted symbol.

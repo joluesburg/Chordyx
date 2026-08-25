@@ -189,16 +189,11 @@ struct SessionMetronomePanel: View {
     }
 
     private var beatDots: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<max(1, viewModel.payload.beatsPerBar), id: \.self) { index in
-                let isCurrent = viewModel.displayedMetronomePlaying && viewModel.metronome.currentBeat == index
-                Circle()
-                    .fill(isCurrent ? (index == 0 ? AppTheme.accent : AppTheme.accentSecondary) : AppTheme.chordInactive)
-                    .frame(width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8)
-                    .animation(.easeOut(duration: 0.1), value: viewModel.metronome.currentBeat)
-            }
-        }
-        .frame(height: 14)
+        MetronomeBeatDotsRow(
+            metronome: viewModel.metronome,
+            beatsPerBar: max(1, viewModel.payload.beatsPerBar),
+            isPlaying: viewModel.displayedMetronomePlaying
+        )
     }
 
     private var tapTempoButton: some View {
@@ -281,7 +276,77 @@ struct LiveHostDockChip: View {
         .frame(maxWidth: fillWidth ? .infinity : nil)
         .padding(.horizontal, fillWidth ? 10 : 14)
         .padding(.vertical, 10)
-        .background(AppTheme.surfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassCard(cornerRadius: AppTheme.Radius.chip)
+    }
+}
+
+// MARK: - Scoped metronome observation
+
+/// Beat dots that subscribe to `MetronomeEngine` directly instead of `SessionViewModel`.
+struct MetronomeBeatDotsRow: View {
+    @ObservedObject var metronome: MetronomeEngine
+    let beatsPerBar: Int
+    let isPlaying: Bool
+
+    init(metronome: MetronomeEngine, beatsPerBar: Int, isPlaying: Bool) {
+        _metronome = ObservedObject(wrappedValue: metronome)
+        self.beatsPerBar = beatsPerBar
+        self.isPlaying = isPlaying
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<max(1, beatsPerBar), id: \.self) { index in
+                let isCurrent = isPlaying && metronome.currentBeat == index
+                Circle()
+                    .fill(isCurrent ? (index == 0 ? AppTheme.accent : AppTheme.accentSecondary) : AppTheme.chordInactive)
+                    .frame(width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8)
+                    .animation(.easeOut(duration: 0.1), value: metronome.currentBeat)
+            }
+        }
+        .frame(height: 14)
+    }
+}
+
+/// Invisible helper — fires when the metronome beat changes without invalidating parent views.
+struct MetronomeBeatChangeObserver: View {
+    @ObservedObject var metronome: MetronomeEngine
+    let onBeatChange: (Int) -> Void
+
+    init(metronome: MetronomeEngine, onBeatChange: @escaping (Int) -> Void) {
+        _metronome = ObservedObject(wrappedValue: metronome)
+        self.onBeatChange = onBeatChange
+    }
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: metronome.currentBeat) { _, newBeat in
+                onBeatChange(newBeat)
+            }
+    }
+}
+
+struct CountInOverlayHost: View {
+    @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject var metronome: MetronomeEngine
+    let isActive: Bool
+
+    init(viewModel: SessionViewModel, isActive: Bool) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _metronome = ObservedObject(wrappedValue: viewModel.metronome)
+        self.isActive = isActive
+    }
+
+    var body: some View {
+        if isActive, metronome.countInBeatsRemaining > 0 {
+            CountInOverlay(
+                beatsRemaining: metronome.countInBeatsRemaining,
+                beatInBar: max(0, metronome.currentBeat),
+                beatsPerBar: viewModel.payload.beatsPerBar
+            )
+            .transition(.scale.combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
     }
 }

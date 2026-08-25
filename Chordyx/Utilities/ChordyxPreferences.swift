@@ -61,4 +61,15 @@ enum ChordyxPreferences {
             MIDIOutputManager.shared.setEnabled(newValue)
         }
     }
+
+    nonisolated static let defaultLivePlayInputModeKey = "prefs.defaultLivePlayInputMode"
+
+    nonisolated static var defaultLivePlayInputMode: LivePlayInputMode {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: defaultLivePlayInputModeKey),
+                  let mode = LivePlayInputMode(rawValue: raw) else { return .piano }
+            return mode
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultLivePlayInputModeKey) }
+    }
 }

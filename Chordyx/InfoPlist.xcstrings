@@ -153,24 +153,24 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Chordyx scans printed chord sheets with your camera to build a song progression automatically."
+            "value" : "Chordyx uses the camera to scan join QR codes and printed chord sheets."
           }
         },
         "es" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needs_review",
             "value" : "Chordyx escanea partituras con acordes con la cámara para crear la progresión automáticamente."
           }
         },
         "fr" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needs_review",
             "value" : "Chordyx scanne les grilles d’accords imprimées avec votre caméra pour créer automatiquement une progression de chanson."
           }
         },
         "pt" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needs_review",
             "value" : "O Chordyx escaneia cifras impressas com a câmera para montar automaticamente a progressão da música."
           }
         }
@@ -207,30 +207,30 @@
     },
     "NSMicrophoneUsageDescription" : {
       "comment" : "Privacy - Microphone Usage Description",
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "Chordyx listens to your piano through the microphone to detect tempo and musical style with audio AI for solo drum accompaniment."
+            "state" : "translated",
+            "value" : "Chordyx can use the microphone for optional on-device audio analysis during practice. Audio stays on your device."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Chordyx escucha tu piano por el micrófono para detectar tempo y estilo musical con IA de audio para el acompañamiento de batería en solitario."
+            "value" : "Chordyx puede usar el micrófono para análisis de audio opcional en el dispositivo durante la práctica. El audio permanece en tu dispositivo."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Chordyx écoute votre piano via le microphone pour détecter le tempo et le style musical avec l’IA audio pour l’accompagnement de batterie en solo."
+            "value" : "Chordyx peut utiliser le microphone pour une analyse audio optionnelle sur l’appareil pendant la pratique. L’audio reste sur votre appareil."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O Chordyx escuta seu piano pelo microfone para detectar o tempo e o estilo musical com AI de áudio para acompanhamento de bateria solo."
+            "value" : "O Chordyx pode usar o microfone para análise de áudio opcional no dispositivo durante a prática. O áudio permanece no seu dispositivo."
           }
         }
       }

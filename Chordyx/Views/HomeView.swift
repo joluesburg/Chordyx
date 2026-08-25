@@ -163,7 +163,7 @@ struct HomeView: View {
     private var homeNavigationStack: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundGradient.ignoresSafeArea()
+                Color.clear.appShellBackground()
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: PlatformLayout.usesWideHomeLayout(horizontalSizeClass: horizontalSizeClass) ? 36 : (verticalSizeClass == .compact ? 16 : 24)) {
@@ -246,11 +246,7 @@ struct HomeView: View {
         HStack(spacing: 14) {
             ChordyxBrandMark(size: 52, glowOpacity: 0.85)
                 .padding(6)
-                .background(AppTheme.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                }
+                .glassCard(cornerRadius: 14)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Chordyx")
@@ -287,9 +283,7 @@ struct HomeView: View {
             .foregroundStyle(AppTheme.textSecondary)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(AppTheme.surface)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+            .liquidGlassCapsule()
         }
         .padding(.bottom, 8)
     }
@@ -483,10 +477,7 @@ struct HomeView: View {
 
     private func homeSectionHeader(_ title: LocalizedStringKey) -> some View {
         Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(AppTheme.textSecondary)
-            .textCase(.uppercase)
-            .tracking(0.8)
+            .appSectionHeader()
             .padding(.leading, 4)
     }
 
@@ -517,12 +508,7 @@ struct HomeView: View {
             .foregroundStyle(AppTheme.textPrimary)
             .frame(maxWidth: .infinity, alignment: style == .list ? .leading : .center)
             .padding(padding(for: style))
-            .background(AppTheme.surface.opacity(style == .compact ? 0.72 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius(for: style), style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius(for: style), style: .continuous)
-                    .stroke(Color.white.opacity(style == .compact ? 0.05 : 0.08), lineWidth: 1)
-            )
+            .glassCard(cornerRadius: cornerRadius(for: style))
         }
         .buttonStyle(.plain)
     }
@@ -624,6 +610,7 @@ struct HostSetupView: View {
     @State private var selectedKey: MusicalKey = .C
     @State private var selectedNotation: ChordNotation = .symbol
     @State private var sessionKind: HostSessionKind = .liveChords
+    @State private var livePlayInputMode: LivePlayInputMode = ChordyxPreferences.defaultLivePlayInputMode
     @State private var performanceMode: SessionPerformanceMode = .live
     @State private var keySelectionMode: SessionKeySelectionMode = .auto
     @FocusState private var nameFieldFocused: Bool
@@ -632,7 +619,7 @@ struct HostSetupView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppTheme.backgroundGradient.ignoresSafeArea()
+                Color.clear.appShellBackground()
                 RadialGradient(
                     colors: [AppTheme.accentSecondary.opacity(0.16), .clear],
                     center: .topTrailing,
@@ -681,6 +668,30 @@ struct HostSetupView: View {
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
+
+                            if sessionKind == .liveChords {
+                                Text(String(localized: "How will you drive chords?"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                    .textCase(.uppercase)
+                                    .padding(.top, 4)
+
+                                HStack(spacing: 10) {
+                                    ForEach(LivePlayInputMode.allCases) { mode in
+                                        HostSetupChoiceCard(
+                                            title: mode.label,
+                                            subtitle: mode.shortLabel,
+                                            systemImage: mode.systemImage,
+                                            isSelected: livePlayInputMode == mode
+                                        ) {
+                                            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                                livePlayInputMode = mode
+                                                ChordyxPreferences.defaultLivePlayInputMode = mode
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         HostSetupSection(title: String(localized: "Session")) {
@@ -836,7 +847,8 @@ struct HostSetupView: View {
                     name: resolvedName,
                     key: key,
                     notation: selectedNotation,
-                    autoDetectKey: autoDetectKey
+                    autoDetectKey: autoDetectKey,
+                    inputMode: livePlayInputMode
                 ),
                 libraryStore: store
             )
@@ -854,21 +866,21 @@ private enum HostSessionKind: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .progression: String(localized: "Progression")
-        case .liveChords: String(localized: "Live Piano")
+        case .liveChords: String(localized: "Live Play")
         }
     }
 
     var shortLabel: String {
         switch self {
         case .progression: String(localized: "Chart + next chord")
-        case .liveChords: String(localized: "Piano / MIDI live")
+        case .liveChords: String(localized: "MIDI or tap pad")
         }
     }
 
     var systemImage: String {
         switch self {
         case .progression: "circle.grid.cross"
-        case .liveChords: "pianokeys"
+        case .liveChords: "dot.radiowaves.left.and.right"
         }
     }
 
@@ -877,7 +889,7 @@ private enum HostSessionKind: String, CaseIterable, Identifiable {
         case .progression:
             String(localized: "Chord ring with next-chord preview. Add chords as you go or load a saved song.")
         case .liveChords:
-            String(localized: "Play on piano or MIDI — guests see only the current chord, no next-chord preview.")
+            String(localized: "Share the current chord live — piano, guitar MIDI pickup, or tap pad. Guests see only NOW.")
         }
     }
 }
@@ -891,22 +903,14 @@ private struct HostSetupSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.textSecondary)
-                .textCase(.uppercase)
-                .tracking(0.6)
+                .appSectionHeader()
 
             VStack(alignment: .leading, spacing: 14) {
                 content
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            }
+            .glassCard()
         }
     }
 }
@@ -938,13 +942,23 @@ private struct HostSetupChoiceCard: View {
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
             .background(
-                isSelected ? AppTheme.accent.opacity(0.14) : AppTheme.surfaceElevated.opacity(0.55),
+                isSelected ? AppTheme.glassSelectionFill : AppTheme.surfaceElevated.opacity(0.45),
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        isSelected ? AppTheme.accent.opacity(0.65) : Color.white.opacity(0.06),
+                    .strokeBorder(
+                        isSelected
+                            ? LinearGradient(
+                                colors: [AppTheme.accent.opacity(0.7), AppTheme.glassBorderShadow],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [AppTheme.glassBorderHighlight.opacity(0.45), AppTheme.glassBorderShadow.opacity(0.55)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
                         lineWidth: isSelected ? 1.5 : 1
                     )
             }

@@ -37,10 +37,21 @@ enum KeyChordAnalysis: Sendable {
         return true
     }
 
-    /// Enough ordered chord evidence to announce a key (distinct roots + length, or a cadence).
+        /// Power chords and sus are valid live evidence when the host plays guitar.
+    static func contributesToLiveKeyEvidence(symbol: String, pitchClassCount: Int, guitarMode: Bool) -> Bool {
+        if isChordVoicing(pitchClassCount: pitchClassCount, symbol: symbol) { return true }
+        guard guitarMode, pitchClassCount >= 2 else { return false }
+        let normalized = LiveRing.normalize(symbol)
+        if normalized.hasSuffix("5") || normalized.contains("sus") { return true }
+        return false
+    }
+
+    /// Enough ordered chord evidence to announce a key.
+    /// Worship rule: never lock on a single short phrase — wait for ~2 full loops.
     static func hasProgressionEvidence(_ symbols: [String]) -> Bool {
         let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
-        guard normalized.count >= 3 else { return false }
+        // Three consecutive chords are never enough (host rule).
+        guard normalized.count >= 6 else { return false }
 
         let roots = normalized.compactMap { symbol -> Int? in
             guard let parsed = Transposer.parse(symbol) else { return nil }
@@ -50,34 +61,30 @@ enum KeyChordAnalysis: Sendable {
         guard distinctRoots.count >= 2 else { return false }
 
         let hasQualityChord = normalized.contains { hasTriadOrSeventhQuality($0) }
-
-        // A real minor (or major cadence) tonic can unlock at 3 events (Dm–Gm–A).
-        if establishedMinorTonic(in: normalized) != nil { return true }
-        if majorCadenceDestination(in: normalized) != nil, hasQualityChord { return true }
+        guard hasQualityChord else { return false }
 
         let hasPowerChord = normalized.contains { symbol in
             guard let parsed = Transposer.parse(symbol) else { return false }
             return parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines) == "5"
         }
+        if hasPowerChord && normalized.allSatisfy({ symbol in
+            guard let parsed = Transposer.parse(symbol) else { return false }
+            let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+            return suffix == "5" || suffix.isEmpty
+        }) {
+            return false
+        }
 
-        // Classic: ≥3 distinct chords with quality — but NOT a 3-event scale run
-        // (Em7–F–G from D–E–G clusters). Need a 4th event so cadences / loops can appear.
-        if distinctRoots.count >= 3, hasQualityChord, normalized.count >= 4,
-           !(hasPowerChord && !hasQualityChord) {
+        // Primary gate: the same loop heard twice in a row.
+        if WorshipAutoKeyRules.hasTwoLoopEvidence(normalized) {
             return true
         }
 
-        // Two-chord loops need a clear cadence AND a real quality (not D5–A5 alone).
-        if normalized.count >= 4, hasQualityChord,
-           hasAuthenticOrPlagalCadence(symbols: normalized) {
-            return true
-        }
-
-        // Strong tonic mass over time (same minor/major tonic recurring).
-        if normalized.count >= 5, hasQualityChord, let tonic = dominantTonicRoot(in: roots),
-           roots.filter({ $0 == tonic }).count >= 3 {
-            return true
-        }
+        // Fallback for irregular phrases: enough length + cadence / established tonic.
+        guard normalized.count >= 8 else { return false }
+        if establishedMinorTonic(in: normalized) != nil { return true }
+        if majorCadenceDestination(in: normalized) != nil { return true }
+        if distinctRoots.count >= 3 { return true }
         return false
     }
 
@@ -213,6 +220,12 @@ enum KeyChordAnalysis: Sendable {
     ) -> MusicalKey {
         let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
         guard normalized.count >= 3 else { return currentBest }
+
+        // 0) Worship / church loop priors (2× vi–IV–I–V, V–IV–I, Andalusian, …).
+        if let worshipKey = WorshipAutoKeyRules.resolveKey(from: normalized) {
+            return worshipKey
+        }
+
         let tones = chordTones(from: normalized)
 
         // 1) Clear major cadence destination always wins over stray minor/ii noise.

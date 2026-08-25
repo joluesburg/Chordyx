@@ -66,29 +66,92 @@ struct LibraryKeyMatchTests {
 struct LiveKeyIntelligenceTests {
 
     @Test func detectsPopProgressionInC() {
-        let result = LiveKeyIntelligence.detect(from: ["C", "G", "Am", "F", "C"])
+        let result = LiveKeyIntelligence.detect(from: ["C", "G", "Am", "F", "C", "G", "Am", "F"])
         #expect(result?.key == .C)
         #expect((result?.confidence ?? 0) > 0.12)
     }
 
     @Test func detectsWorshipProgressionInG() {
-        let result = LiveKeyIntelligence.detect(from: ["G", "D", "Em", "C", "G"])
+        let result = LiveKeyIntelligence.detect(from: ["G", "D", "Em", "C", "G", "D", "Em", "C"])
         #expect(result?.key == .G)
     }
 
     @Test func detectsTwoFiveOneInF() {
-        let result = LiveKeyIntelligence.detect(from: ["Gm", "C7", "F", "F"])
+        let result = LiveKeyIntelligence.detect(from: ["Gm", "C7", "F", "Gm", "C7", "F"])
         #expect(result?.key == .F)
     }
 
     @Test func reportsMIRContributors() {
-        let breakdown = LiveKeyIntelligence.analyze(symbols: ["D", "A", "Bm", "G"])
+        let breakdown = LiveKeyIntelligence.analyze(symbols: ["D", "A", "Bm", "G", "D", "A", "Bm", "G"])
         #expect(breakdown?.bestKey == .D)
         #expect((breakdown?.contributors.count ?? 0) >= 5)
     }
 
     @Test func needsAtLeastThreeChords() {
         #expect(LiveKeyIntelligence.detect(from: ["C", "G"]) == nil)
+    }
+}
+
+struct WorshipAutoKeyRulesTests {
+
+    private func two(_ loop: [String]) -> [String] { loop + loop }
+
+    @Test func threeChordsNeverUnlock() {
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(["Am", "F", "C"]))
+        #expect(!WorshipAutoKeyRules.hasTwoLoopEvidence(["Am", "F", "C"]))
+    }
+
+    @Test func amFCGIsCAfterTwoLoops() {
+        let symbols = two(["Am", "F", "C", "G"])
+        #expect(WorshipAutoKeyRules.hasTwoLoopEvidence(symbols))
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .C)
+        #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
+    }
+
+    @Test func gDEmCIsG() {
+        let symbols = two(["G", "D", "Em", "C"])
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .G)
+    }
+
+    @Test func cBbFIsFNotC() {
+        let symbols = two(["C", "Bb", "F"])
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .F)
+        #expect(KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: symbols,
+            scores: Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, $0 == .C ? 1.0 : 0.1) }),
+            currentBest: .C
+        ) == .F)
+    }
+
+    @Test func andalusianIsAMinorLetter() {
+        let symbols = two(["Am", "G", "F", "E"])
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .A)
+    }
+
+    @Test func ambiguousDEmGDependsOnFourth() {
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["D", "Em", "G", "A"])) == .D)
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["D", "Em", "G", "C"])) == .G)
+    }
+
+    @Test func ambiguousCDmFDependsOnFourth() {
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["C", "Dm", "F", "Bb"])) == .F)
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["C", "Dm", "F", "G"])) == .C)
+    }
+
+    @Test func amFGPlusCIsCPlusDmIsA() {
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["Am", "F", "G", "C"])) == .C)
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["Am", "F", "G", "Dm"])) == .A)
+    }
+
+    @Test func dmGCIIsC() {
+        #expect(WorshipAutoKeyRules.resolveKey(from: two(["Dm", "G", "C"])) == .C)
+    }
+
+    @Test func longAmJourneyIsA() {
+        let loop = ["Am", "E", "Am", "Dm", "G", "C", "F", "Dm", "E", "Am"]
+        let symbols = two(loop)
+        #expect(WorshipAutoKeyRules.hasTwoLoopEvidence(symbols))
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .A)
     }
 }
 
@@ -737,7 +800,7 @@ struct AutoKeyLivePathTests {
     }
 
     @Test func vetoesEAgainstDMinorProgression() {
-        let symbols = ["Dm", "Gm", "A", "Dm"]
+        let symbols = ["Dm", "Gm", "A", "Dm", "Dm", "Gm", "A", "Dm"]
         #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
         #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
         let decision = decide(symbols: symbols, detect: stub(.E, confidence: 0.95, source: .memory))
@@ -745,7 +808,7 @@ struct AutoKeyLivePathTests {
     }
 
     @Test func dMinorProgressionCommitsDNotE() {
-        let symbols = ["Dm", "Gm", "A", "Dm"]
+        let symbols = ["Dm", "Gm", "A", "Dm", "Dm", "Gm", "A", "Dm"]
         let intelligence = LiveKeyIntelligence.detect(from: symbols)
         #expect(intelligence?.key == .D)
 
@@ -754,7 +817,7 @@ struct AutoKeyLivePathTests {
     }
 
     @Test func dMinorProgressionUsesSameCommitFunctionAsSession() {
-        let symbols = ["Dm", "Gm", "A", "Dm"]
+        let symbols = ["Dm", "Gm", "A", "Dm", "Dm", "Gm", "A", "Dm"]
         let decision = decide(
             symbols: symbols,
             detect: { live, _ in
@@ -771,7 +834,7 @@ struct AutoKeyLivePathTests {
 
     @Test func cooldownBlocksPrematureLetter() {
         let decision = decide(
-            symbols: ["Dm", "Gm", "A", "Dm"],
+            symbols: ["Dm", "Gm", "A", "Dm", "Dm", "Gm", "A", "Dm"],
             armedAt: 100,
             now: 101,
             detect: stub(.D, confidence: 0.9)
@@ -779,10 +842,41 @@ struct AutoKeyLivePathTests {
         #expect(decision == nil)
     }
 
+    @Test func oneLoopDoesNotUnlockEvenWithStrongStub() {
+        let symbols = ["Am", "F", "C", "G"]
+        #expect(!KeyChordAnalysis.hasProgressionEvidence(symbols))
+        let decision = decide(symbols: symbols, detect: stub(.C, confidence: 0.99))
+        #expect(decision == nil)
+    }
+
     @Test func latinTonicForDIsRe() {
         #expect(ChordNotation.latin.cycleGlyph(for: .D) == "Re")
         #expect(ChordNotation.latin.cycleGlyph(for: .E) == "Mi")
         #expect(ChordNotation.symbol.cycleGlyph(for: .D) == "D")
+    }
+}
+
+struct ChordRecognizerGuitarTests {
+
+    @Test func openGTriadFromMIDINotes() {
+        // G2 B2 D3 (MIDI 43, 47, 50)
+        let notes = [43, 47, 50].map { PianoNote.fromMIDINote($0) }
+        let symbol = ChordRecognizer.symbolForLiveGuitar(notes: notes, preferFlats: false)
+        #expect(symbol == "G")
+    }
+
+    @Test func powerChordRootFifth() {
+        // E2 B2 (40, 47)
+        let notes = [40, 47].map { PianoNote.fromMIDINote($0) }
+        let symbol = ChordRecognizer.symbolForLiveGuitar(notes: notes, preferFlats: false)
+        #expect(symbol == "E5")
+    }
+
+    @Test func amTriadLowRegister() {
+        // A2 C3 E3 (45, 48, 52)
+        let notes = [45, 48, 52].map { PianoNote.fromMIDINote($0) }
+        let symbol = ChordRecognizer.symbolForLiveGuitar(notes: notes, preferFlats: false)
+        #expect(symbol == "Am")
     }
 }
 

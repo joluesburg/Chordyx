@@ -673,6 +673,7 @@
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Chordyx uses the camera to scan join QR codes and printed chord sheets.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx finds nearby band members on your local network so you can host or join a live chord session.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chordyx can use the microphone for optional on-device audio analysis during practice. Audio stays on your device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Chordyx can import chord charts from photos in your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -715,6 +716,7 @@
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Chordyx uses Bluetooth to discover nearby musicians when Wi‑Fi peer discovery is unavailable.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Chordyx uses the camera to scan join QR codes and printed chord sheets.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Chordyx finds nearby band members on your local network so you can host or join a live chord session.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chordyx can use the microphone for optional on-device audio analysis during practice. Audio stays on your device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Chordyx can import chord charts from photos in your library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

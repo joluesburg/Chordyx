@@ -10,10 +10,26 @@ import SwiftUI
 
 struct ChordClockView: View {
     @ObservedObject var viewModel: SessionViewModel
+    @ObservedObject private var metronome: MetronomeEngine
     var isGuest: Bool = true
     var chords: [ChordEntry]
     var guestTranspose: Int = 0
     var guestCapo: Int = 0
+
+    init(
+        viewModel: SessionViewModel,
+        isGuest: Bool = true,
+        chords: [ChordEntry],
+        guestTranspose: Int = 0,
+        guestCapo: Int = 0
+    ) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _metronome = ObservedObject(wrappedValue: viewModel.metronome)
+        self.isGuest = isGuest
+        self.chords = chords
+        self.guestTranspose = guestTranspose
+        self.guestCapo = guestCapo
+    }
 
     private let maxDialChords = 12
 
@@ -67,7 +83,7 @@ struct ChordClockView: View {
     }
 
     private var currentBeat: Int {
-        viewModel.metronome.currentBeat
+        metronome.currentBeat
     }
 
     private var metronomePlaying: Bool {

@@ -38,7 +38,7 @@ struct PlatformHomeDestinationShell<Content: View>: View {
                     .foregroundStyle(AppTheme.textPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .liquidGlassCapsule()
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -53,7 +53,7 @@ struct PlatformHomeDestinationShell<Content: View>: View {
                 .platformDesktopControls()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppTheme.backgroundGradient.ignoresSafeArea())
+        .appShellBackground()
         .preferredColorScheme(.dark)
     }
 }
@@ -390,13 +390,23 @@ struct PlatformSegmentedPicker<Selection: Hashable>: View {
                 .frame(maxWidth: equalWidth ? .infinity : nil)
                 .foregroundStyle(isSelected ? AppTheme.textPrimary : AppTheme.textSecondary)
                 .background(
-                    isSelected ? AppTheme.accent.opacity(0.22) : AppTheme.surface,
+                    isSelected ? AppTheme.glassSelectionFill : AppTheme.surface.opacity(0.35),
                     in: Capsule()
                 )
                 .overlay {
                     Capsule()
-                        .stroke(
-                            isSelected ? AppTheme.accent.opacity(0.45) : Color.white.opacity(0.08),
+                        .strokeBorder(
+                            isSelected
+                                ? LinearGradient(
+                                    colors: [AppTheme.accent.opacity(0.55), AppTheme.glassBorderShadow],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                : LinearGradient(
+                                    colors: [AppTheme.glassBorderHighlight.opacity(0.5), AppTheme.glassBorderShadow.opacity(0.6)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
                             lineWidth: 1
                         )
                 }
@@ -567,11 +577,13 @@ extension View {
             )
             .presentationSizing(.form)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(AppTheme.backgroundGradient.ignoresSafeArea())
+            .appShellBackground()
             .preferredColorScheme(.dark)
         }
         #else
-        self
+        appShellBackground()
+            .preferredColorScheme(.dark)
+            .liquidGlassSheetBackground()
         #endif
     }
 

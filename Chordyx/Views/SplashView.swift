@@ -19,7 +19,7 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            AppTheme.backgroundGradient.ignoresSafeArea()
+            Color.clear.appShellBackground()
 
             VStack(spacing: 32) {
                 ChordyxBrandMark(

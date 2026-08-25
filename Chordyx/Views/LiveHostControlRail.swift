@@ -70,8 +70,8 @@ struct LiveHostControlRail: View {
             }
         }
         .background {
-            AppTheme.background
-                .opacity(0.96)
+            AppTheme.background.opacity(0.88)
+                .background(.ultraThinMaterial)
                 .ignoresSafeArea()
         }
     }
@@ -160,15 +160,14 @@ struct LiveHostControlRail: View {
                         .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
-                        .background(isSelected ? AppTheme.surfaceElevated : Color.clear)
+                        .background(isSelected ? AppTheme.glassSelectionFill : Color.clear)
                         .foregroundStyle(isSelected ? AppTheme.textPrimary : AppTheme.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(2)
-        .background(AppTheme.surface.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .glassCard(cornerRadius: 8)
         .frame(maxWidth: 180)
         .accessibilityLabel(String(localized: "Dock height"))
     }
@@ -239,8 +238,12 @@ struct LiveHostControlRail: View {
             .foregroundStyle(isSelected ? AppTheme.accent : AppTheme.textSecondary)
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(AppTheme.accent.opacity(0.14))
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.dockTab, style: .continuous)
+                        .fill(AppTheme.glassSelectionFill)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: AppTheme.Radius.dockTab, style: .continuous)
+                                .strokeBorder(AppTheme.accent.opacity(0.35), lineWidth: 1)
+                        }
                 }
             }
         }
@@ -277,6 +280,11 @@ struct LiveHostControlRail: View {
         VStack(alignment: .leading, spacing: 12) {
             if needsLiveChordTransport {
                 LiveChordTransportCompact(viewModel: viewModel)
+            }
+
+            if isHost, viewModel.canDriveSession,
+               viewModel.payload.isLiveChordsOnly || viewModel.payload.ringShowsLiveChords {
+                LiveChordPadView(viewModel: viewModel)
             }
 
             Text(String(localized: "Quick Actions"))
@@ -363,7 +371,6 @@ struct LiveHostControlRail: View {
             HStack {
                 SessionFeaturesMenu(
                     viewModel: viewModel,
-                    store: store,
                     showGuestRoles: $showGuestRoles,
                     showRehearsalList: $showRehearsalList,
                     showJoinQR: $showJoinQR,
