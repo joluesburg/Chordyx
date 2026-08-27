@@ -115,6 +115,25 @@ enum WorshipAutoKeyRules: Sendable {
         ) {
             return key // i iv V i
         }
+        // Am D Bm Em → G (ii V iii vi) — common worship / pop in G; not C.
+        if let key = matchDegreeTemplate(
+            loop,
+            degrees: [2, 7, 4, 9],
+            minorMask: [true, false, true, true],
+            tonicIsMinor: false
+        ) {
+            return key
+        }
+        // Am D Bm Em Am D G → G (ii V iii vi ii V I)
+        if let key = matchDegreeTemplate(
+            loop,
+            degrees: [2, 7, 4, 9, 2, 7, 0],
+            minorMask: [true, false, true, true, true, false, false],
+            tonicIsMinor: false
+        ) {
+            return key
+        }
+        // Am D G → G (ii V I) shorter stem
         if let key = matchDegreeTemplate(
             loop,
             degrees: [2, 7, 0],

@@ -96,6 +96,176 @@ struct WorshipAutoKeyRulesTests {
 
     private func two(_ loop: [String]) -> [String] { loop + loop }
 
+    @MainActor
+    @Test func dMajorFamilyNeverBecomesE() {
+        let symbols = ["D", "G", "A", "Bm", "D", "G", "A", "Bm"]
+        #expect(KeyChordAnalysis.establishedMajorFamilyTonic(in: symbols) == MusicalKey.D.pitchClass)
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
+        #expect(!KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .D))
+        #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
+        #expect(KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: symbols,
+            scores: Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, $0 == .E ? 1.0 : 0.1) }),
+            currentBest: .E
+        ) == .D)
+        #expect(AdaptiveKeyLearningEngine.shared.detect(from: symbols, sessionName: nil)?.key == .D)
+    }
+
+    @MainActor
+    @Test func dGAThreeChordsEnoughToVetoE() {
+        let symbols = ["D", "G", "A", "D", "G", "A"]
+        #expect(KeyChordAnalysis.establishedMajorFamilyTonic(in: symbols) == MusicalKey.D.pitchClass)
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
+        #expect(AdaptiveKeyLearningEngine.shared.detect(from: symbols, sessionName: nil)?.key == .D)
+    }
+
+    @MainActor
+    @Test func dBmGAIsDNotE() {
+        let symbols = ["D", "Bm", "G", "A", "D", "Bm", "G", "A"]
+        #expect(KeyChordAnalysis.establishedMajorFamilyTonic(in: symbols) == MusicalKey.D.pitchClass)
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
+        #expect(AdaptiveKeyLearningEngine.shared.detect(from: symbols, sessionName: nil)?.key == .D)
+    }
+
+    @MainActor
+    @Test func audioHintDetectsWithoutChordProgression() {
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+        var scores = Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, 0.05) })
+        scores[.G] = 1.0
+        AdaptiveKeyLearningEngine.shared.updateAudioKeyHint(
+            key: .G,
+            scale: .mixolydian,
+            confidence: 0.42,
+            scores: scores
+        )
+        let result = AdaptiveKeyLearningEngine.shared.detect(from: [], sessionName: nil)
+        #expect(result?.key == .G)
+        #expect(result?.source == .audio)
+        #expect(result?.scale == .mixolydian)
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+    }
+
+    @MainActor
+    @Test func chordFamilyBeatsConflictingAudioHint() {
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+        var scores = Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, 0.05) })
+        scores[.E] = 1.0
+        AdaptiveKeyLearningEngine.shared.updateAudioKeyHint(
+            key: .E,
+            scale: .major,
+            confidence: 0.9,
+            scores: scores
+        )
+        let symbols = ["D", "G", "A", "Bm", "D", "G", "A", "Bm"]
+        let result = AdaptiveKeyLearningEngine.shared.detect(from: symbols, sessionName: nil)
+        #expect(result?.key == .D)
+        #expect(result?.source == .ensemble)
+        #expect(result?.scale == .major)
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+    }
+
+    @Test func majorTriadLettersCountAsChordVoicing() {
+        #expect(KeyChordAnalysis.isChordVoicing(pitchClassCount: 3, symbol: "C"))
+        #expect(KeyChordAnalysis.isChordVoicing(pitchClassCount: 3, symbol: "G"))
+        #expect(!KeyChordAnalysis.isChordVoicing(pitchClassCount: 1, symbol: "E"))
+        #expect(KeyChordAnalysis.hasTriadOrSeventhQuality("C"))
+        #expect(KeyChordAnalysis.hasTriadOrSeventhQuality("C/E"))
+    }
+
+    @Test func keyEvidenceSymbolPreservesInversion() {
+        // Internal indices: E=4 bass, C=12, E=16, G=19 → C/E
+        let symbol = KeyChordAnalysis.keyEvidenceSymbol(
+            displaySymbol: "C",
+            noteIndices: [4, 12, 16, 19],
+            preferFlats: false
+        )
+        #expect(symbol == "C/E")
+    }
+
+    @MainActor
+    @Test func midiVoicingChromaDetectsWithoutManySymbols() {
+        AdaptiveKeyLearningEngine.shared.clearMIDIChroma()
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+        // Two C major voicings into MIDI chroma.
+        AdaptiveKeyLearningEngine.shared.ingestMIDIVoicing(pitchClasses: [0, 4, 7], bassPitchClass: 0)
+        AdaptiveKeyLearningEngine.shared.ingestMIDIVoicing(pitchClasses: [0, 4, 7], bassPitchClass: 0)
+        AdaptiveKeyLearningEngine.shared.ingestMIDIVoicing(pitchClasses: [0, 2, 4, 5, 7, 9, 11], bassPitchClass: 0)
+        let result = AdaptiveKeyLearningEngine.shared.detect(from: [], sessionName: nil)
+        #expect(result?.key == .C)
+        #expect(result?.source == .midi)
+        AdaptiveKeyLearningEngine.shared.clearMIDIChroma()
+    }
+
+    @Test func dMajorFamilyInfersMajorScale() {
+        let scale = TonalScaleIntelligence.inferScale(
+            from: ["D", "G", "A", "Bm", "D", "G", "A", "Bm"],
+            tonic: .D
+        )
+        #expect(scale == .major)
+    }
+
+    @Test func dominantOnTonicInfersMixolydian() {
+        let scale = TonalScaleIntelligence.inferScale(
+            from: ["G7", "C", "F", "G7", "C"],
+            tonic: .G
+        )
+        #expect(scale == .mixolydian)
+    }
+
+    @Test func chromaMajorTemplateDetectsCMajor() {
+        // Strong C tonic + C major collection (C D E F G A B).
+        var chroma = [Double](repeating: 0.02, count: 12)
+        chroma[0] = 1.6
+        chroma[2] = 0.85
+        chroma[4] = 1.1
+        chroma[5] = 0.8
+        chroma[7] = 1.35
+        chroma[9] = 0.75
+        chroma[11] = 0.7
+        let detected = TonalScaleIntelligence.detectFromChroma(chroma)
+        #expect(detected?.key == .C)
+        let scale = detected?.scale
+        #expect(
+            scale == .major
+                || scale == .majorPentatonic
+                || scale == .lydian
+                || scale == .mixolydian
+                || scale == .naturalMinor
+        )
+    }
+
+    @Test func fmaj7PadWithC7IsFNotE() {
+        let symbols = ["Fmaj7", "Gm7", "Am7", "Gsus4", "D7", "C7"]
+        #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
+        #expect(KeyChordAnalysis.establishedMajorTonicFromIAndV7(in: symbols) == MusicalKey.F.pitchClass)
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
+        #expect(!KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .F))
+        #expect(KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: symbols,
+            scores: Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, $0 == .E ? 1.0 : 0.15) }),
+            currentBest: .E
+        ) == .F)
+    }
+
+    @Test func amDBmEmAmDGIsGNotC() {
+        let symbols = ["Am", "D", "Bm", "Em", "Am", "D", "G"]
+        #expect(KeyChordAnalysis.hasProgressionEvidence(symbols))
+        #expect(KeyChordAnalysis.authenticDominantCadenceDestination(in: symbols) == MusicalKey.G.pitchClass)
+        #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .C))
+        #expect(!KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .G))
+        #expect(KeyChordAnalysis.resolveLiveTonalCenter(
+            symbols: symbols,
+            scores: Dictionary(uniqueKeysWithValues: MusicalKey.allCases.map { ($0, $0 == .C ? 1.0 : 0.2) }),
+            currentBest: .C
+        ) == .G)
+        #expect(LiveKeyIntelligence.detect(from: symbols)?.key == .G)
+    }
+
+    @Test func amDBmEmTwoLoopsIsG() {
+        let symbols = two(["Am", "D", "Bm", "Em"])
+        #expect(WorshipAutoKeyRules.resolveKey(from: symbols) == .G)
+    }
+
     @Test func threeChordsNeverUnlock() {
         #expect(!KeyChordAnalysis.hasProgressionEvidence(["Am", "F", "C"]))
         #expect(!WorshipAutoKeyRules.hasTwoLoopEvidence(["Am", "F", "C"]))
@@ -805,6 +975,49 @@ struct AutoKeyLivePathTests {
         #expect(KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: .E))
         let decision = decide(symbols: symbols, detect: stub(.E, confidence: 0.95, source: .memory))
         #expect(decision == nil)
+    }
+
+    @Test func liveFollowFlipsOnClearModulation() {
+        // Already following D; recent window is clearly C major → flip without sticky lock.
+        let symbols = ["C", "F", "G", "Am", "C", "F", "G", "Am"]
+        let decision = decide(
+            symbols: symbols,
+            currentKey: .D,
+            isKeyAutoDetected: true,
+            lockedConfidence: 0.95,
+            detect: stub(.C, confidence: 0.70)
+        )
+        #expect(decision?.action == .commit(key: .C, source: .ensemble))
+    }
+
+    @Test func audioAloneCanCommitWithoutChordEvidence() {
+        let decision = decide(
+            symbols: ["E"],
+            currentKey: .C,
+            isKeyAutoDetected: false,
+            detect: stub(.D, confidence: 0.40, source: .audio)
+        )
+        #expect(decision?.action == .commit(key: .D, source: .audio))
+    }
+
+    @Test func nonAudioStillNeedsProgressionEvidence() {
+        let decision = decide(
+            symbols: ["E"],
+            detect: stub(.E, confidence: 0.99, source: .ensemble)
+        )
+        #expect(decision == nil)
+    }
+
+    @Test func audioFollowFlipsOnMicChange() {
+        let decision = decide(
+            symbols: ["D", "A"],
+            currentKey: .D,
+            isKeyAutoDetected: true,
+            lockedConfidence: 0.9,
+            forcePeriodicReview: true,
+            detect: stub(.G, confidence: 0.35, source: .audio)
+        )
+        #expect(decision?.action == .commit(key: .G, source: .audio))
     }
 
     @Test func dMinorProgressionCommitsDNotE() {

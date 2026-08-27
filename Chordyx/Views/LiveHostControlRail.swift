@@ -429,6 +429,24 @@ struct LiveHostControlRail: View {
                 .platformSheet(isPresented: $isKeyMenuPresented) {
                     SessionMusicalKeyPicker(viewModel: viewModel, isPresented: $isKeyMenuPresented)
                 }
+                .contextMenu {
+                    if viewModel.payload.autoDetectKey {
+                        Button {
+                            viewModel.releaseAutoKeyFollow()
+                        } label: {
+                            Label(String(localized: "Re-listen"), systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                }
+
+                if viewModel.payload.autoDetectKey, viewModel.payload.isKeyAutoDetected {
+                    quickAction(
+                        icon: "arrow.counterclockwise",
+                        title: String(localized: "Re-listen")
+                    ) {
+                        viewModel.releaseAutoKeyFollow()
+                    }
+                }
 
                 quickAction(
                     icon: viewModel.payload.isRemoteBackupEnabled ? "icloud.fill" : "icloud",

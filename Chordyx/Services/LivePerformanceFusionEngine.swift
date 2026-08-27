@@ -63,8 +63,10 @@ final class LivePerformanceFusionEngine {
     private(set) var matchedRhythmPatternLabel: String?
     private(set) var globalGenreAnalysis: GlobalGenreAnalysis = .empty
     private(set) var estimatedAudioKey: MusicalKey?
+    private(set) var estimatedAudioScale: MusicalScaleQuality = .major
     private(set) var audioKeyConfidence: Double = 0
     private(set) var audioKeyScores: [MusicalKey: Double] = [:]
+    private(set) var estimatedAudioRelativeKey: MusicalKey?
     /// True when mic is open specifically to assist Auto-key.
     private var keyAssistRequested = false
 
@@ -154,8 +156,16 @@ final class LivePerformanceFusionEngine {
 
     private func clearAudioKeyEstimate() {
         estimatedAudioKey = nil
+        estimatedAudioScale = .major
         audioKeyConfidence = 0
         audioKeyScores = [:]
+        estimatedAudioRelativeKey = nil
+    }
+
+    /// Soft reset of mic chroma only — keeps capture running for Auto-key Re-listen.
+    func resetAudioKeyListening() {
+        audioAnalyzer.resetAudioKeyEstimate()
+        clearAudioKeyEstimate()
     }
 
     func refreshAudioDevices() {
@@ -213,8 +223,10 @@ final class LivePerformanceFusionEngine {
 
         if let key = audioAnalyzer.estimatedAudioKey {
             estimatedAudioKey = key
+            estimatedAudioScale = audioAnalyzer.estimatedAudioScale
             audioKeyConfidence = audioAnalyzer.audioKeyConfidence
             audioKeyScores = audioAnalyzer.audioKeyScores
+            estimatedAudioRelativeKey = audioAnalyzer.estimatedAudioRelativeKey
         }
 
         guard !grooveLocked else {

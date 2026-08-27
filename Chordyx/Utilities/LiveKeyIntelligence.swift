@@ -50,6 +50,8 @@ enum LiveKeyIntelligence: Sendable {
         [0, 9, 5, 7],       // I vi IV V
         [0, 5, 7, 0],       // I IV V I
         [2, 7, 0],          // ii V I
+        [2, 7, 4, 9],       // ii V iii vi (Am D Bm Em → G)
+        [2, 7, 4, 9, 2, 7, 0], // Am D Bm Em Am D G → G
         [0, 7, 0],          // I V I
         [0, 5, 0],          // I IV I (plagal)
         [0, 7, 5, 0],       // I V IV I
@@ -332,7 +334,15 @@ enum LiveKeyIntelligence: Sendable {
             } else if degree == 7 {
                 score = 0.55 // lingering on V often precedes I
             } else if degree == 9, quality == .minor {
-                score = 0.45 // relative minor ending
+                // Ending on vi points to the relative MAJOR tonic (Bm → D), not V of Em (E).
+                score = 0.35
+            }
+            // Relative major of a final minor chord (Bm → D gets +0.70).
+            if quality == .minor {
+                let relativeMajor = MusicalKey.allCases.first { $0.pitchClass == (root + 3) % 12 }
+                if relativeMajor == key {
+                    score = max(score, 0.70)
+                }
             }
             if symbols.count >= 2,
                let prev = Transposer.parse(symbols[symbols.count - 2]),

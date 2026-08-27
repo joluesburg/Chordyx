@@ -10,9 +10,12 @@ import Foundation
 
 struct AdaptiveKeyDetection: Equatable, Sendable {
     let key: MusicalKey
+    /// Detected scale / mode (major, Dorian, blues, …).
+    let scale: MusicalScaleQuality
     /// 0…1
     let confidence: Double
     let source: Source
+    let relativeKey: MusicalKey?
 
     enum Source: String, Sendable {
         case memory
@@ -20,14 +23,31 @@ struct AdaptiveKeyDetection: Equatable, Sendable {
         case ensemble
         case heuristic
         case audio
+        case midi
+    }
+
+    init(
+        key: MusicalKey,
+        scale: MusicalScaleQuality = .major,
+        confidence: Double,
+        source: Source,
+        relativeKey: MusicalKey? = nil
+    ) {
+        self.key = key
+        self.scale = scale
+        self.confidence = confidence
+        self.source = source
+        self.relativeKey = relativeKey ?? scale.relativeKey(of: key)
     }
 }
 
-/// Soft prior from live mic chroma (HPCP + KS). Cleared when stale.
+/// Soft prior from live mic chroma (HPCP + multi-scale). Cleared when stale.
 struct AudioKeyHint: Equatable, Sendable {
     let key: MusicalKey
+    let scale: MusicalScaleQuality
     let confidence: Double
     let scores: [MusicalKey: Double]
+    let relativeKey: MusicalKey?
     let updatedAt: TimeInterval
 }
 
@@ -56,6 +76,10 @@ final class AdaptiveKeyLearningEngine {
     private(set) var libraryHints: [LibraryKeyHint] = []
     /// Soft prior from live audio chroma (mic/line).
     private var audioKeyHint: AudioKeyHint?
+    /// Pitch-class chroma accumulated from the MIDI / piano controller (ground truth when playing).
+    private var midiChroma = [Double](repeating: 0, count: 12)
+    private var midiChromaUpdatedAt: TimeInterval = 0
+    private var midiFrameCount = 0
 
     private init() {
         // Fast local load only — iCloud resolution is async (ubiquity APIs can stall launch on Mac).
@@ -70,13 +94,55 @@ final class AdaptiveKeyLearningEngine {
         libraryHints = hints.filter { $0.symbols.count >= 3 }
     }
 
-    /// Feed HPCP/KS audio key estimate from the live mic pipeline.
-    func updateAudioKeyHint(key: MusicalKey, confidence: Double, scores: [MusicalKey: Double]) {
-        guard confidence >= 0.12 else { return }
+    /// Ingest every sounding MIDI pitch class (and bass) into Auto AI chroma.
+    /// Call on each settled controller voicing — inversions weight the bass harder.
+    func ingestMIDIVoicing(pitchClasses: [Int], bassPitchClass: Int?) {
+        guard !pitchClasses.isEmpty else { return }
+        for i in 0..<12 {
+            midiChroma[i] *= 0.92
+        }
+        let unique = Set(pitchClasses.map { (($0 % 12) + 12) % 12 })
+        for pc in unique {
+            midiChroma[pc] += 1.0
+        }
+        if let bass = bassPitchClass {
+            let b = ((bass % 12) + 12) % 12
+            midiChroma[b] += 1.25
+        }
+        midiFrameCount += 1
+        midiChromaUpdatedAt = Date().timeIntervalSince1970
+    }
+
+    func clearMIDIChroma() {
+        midiChroma = [Double](repeating: 0, count: 12)
+        midiFrameCount = 0
+        midiChromaUpdatedAt = 0
+    }
+
+    private func freshMIDIDetection() -> DetectedTonalCenter? {
+        guard midiFrameCount >= 2 else { return nil }
+        guard Date().timeIntervalSince1970 - midiChromaUpdatedAt <= 6 else {
+            clearMIDIChroma()
+            return nil
+        }
+        return TonalScaleIntelligence.detectFromChroma(midiChroma)
+    }
+
+    /// Feed HPCP multi-scale audio estimate from the live mic pipeline (primary Auto AI signal).
+    func updateAudioKeyHint(
+        key: MusicalKey,
+        scale: MusicalScaleQuality = .major,
+        confidence: Double,
+        scores: [MusicalKey: Double],
+        relativeKey: MusicalKey? = nil
+    ) {
+        guard confidence >= 0.08 else { return }
         audioKeyHint = AudioKeyHint(
             key: key,
+            scale: scale,
             confidence: min(1, confidence),
             scores: scores,
+            relativeKey: relativeKey ?? scale.relativeKey(of: key),
             updatedAt: Date().timeIntervalSince1970
         )
     }
@@ -85,123 +151,305 @@ final class AdaptiveKeyLearningEngine {
         audioKeyHint = nil
     }
 
+    /// MIDI-controller-first Auto AI: voicings + inversions + pitch chroma lead;
+    /// mic reinforces; clear chord-family anchors can still override a wrong letter.
     func detect(from symbols: [String], sessionName: String?) -> AdaptiveKeyDetection? {
         let normalized = normalizedSymbols(symbols)
-        guard normalized.count >= Self.minimumSymbols else {
-            // Never lock Auto-key from mic chroma alone — wait for chord progression evidence.
-            return nil
+        let audio = freshAudioHint()
+        let midi = freshMIDIDetection()
+
+        // Hard chord anchors — progression names the tonic; infer scale from the chords.
+        if let anchored = strongChordAnchorDetection(from: normalized) {
+            return anchored
         }
 
-        let fingerprint = KeyChordAnalysis.fingerprint(from: normalized)
+        let chordBlend = softChordScores(from: normalized, sessionName: sessionName)
+        let hasChordEvidence = KeyChordAnalysis.hasProgressionEvidence(normalized)
 
-        if let memoryHit = recallMemory(fingerprint: fingerprint, sessionName: sessionName),
-           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: memoryHit) {
-            return AdaptiveKeyDetection(key: memoryHit, confidence: 0.92, source: .memory)
-        }
+        // ── Primary when controller is active: MIDI pitch chroma + scale ───────
+        if let midi, midi.confidence >= 0.12, midiFrameCount >= 2 {
+            if hasChordEvidence,
+               KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: midi.key),
+               let chordOnly = resolveSoftChordDetection(
+                scores: chordBlend,
+                symbols: normalized,
+                preferSource: .ensemble
+               ) {
+                return chordOnly
+            }
 
-        if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
-            liveSymbols: normalized,
-            library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
-        ), libraryHit.confidence >= 0.72,
-           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: libraryHit.key) {
+            var blended = [MusicalKey: Double]()
+            for key in MusicalKey.allCases {
+                let m = midi.scores[key] ?? 0
+                let a = audio?.scores[key] ?? 0
+                let c = chordBlend[key] ?? 0
+                // MIDI controller is ground truth; audio soft; chords reinforce.
+                blended[key] = m * 0.58 + a * 0.22 + c * 0.20
+            }
+            blended[midi.key, default: 0] += midi.confidence * 0.20
+            if let audio {
+                blended[audio.key, default: 0] += audio.confidence * 0.08
+            }
+            if !normalized.isEmpty {
+                WorshipAutoKeyRules.applyScoreBoost(symbols: normalized, into: &blended)
+            }
+
+            let ranked = blended.sorted { $0.value > $1.value }
+            let plausible = ranked.first { candidate in
+                guard hasChordEvidence else { return true }
+                return !KeyChordAnalysis.isImplausibleLiveKeyCandidate(
+                    symbols: normalized,
+                    candidate: candidate.key
+                )
+            }
+            if let best = plausible, best.value > 0.12 {
+                let scale: MusicalScaleQuality = {
+                    if best.key == midi.key {
+                        let chordScale = TonalScaleIntelligence.inferScale(from: normalized, tonic: best.key)
+                        if chordScale != .major && chordScale != .naturalMinor { return chordScale }
+                        return midi.scale
+                    }
+                    return TonalScaleIntelligence.inferScale(from: normalized, tonic: best.key)
+                }()
+                return AdaptiveKeyDetection(
+                    key: best.key,
+                    scale: scale,
+                    confidence: max(midi.confidence, min(1, best.value)),
+                    source: best.key == midi.key ? .midi : .ensemble
+                )
+            }
             return AdaptiveKeyDetection(
-                key: libraryHit.key,
-                confidence: libraryHit.confidence,
-                source: .library
+                key: midi.key,
+                scale: midi.scale,
+                confidence: midi.confidence,
+                source: .midi,
+                relativeKey: midi.relativeKey
             )
         }
 
-        // Church loop match after two repetitions — highest-confidence live path.
+        // ── Mic chroma when no / weak MIDI ─────────────────────────────────────
+        if let audio, audio.confidence >= 0.14 {
+            if hasChordEvidence,
+               KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: audio.key),
+               let chordOnly = resolveSoftChordDetection(
+                scores: chordBlend,
+                symbols: normalized,
+                preferSource: .ensemble
+               ) {
+                return chordOnly
+            }
+
+            var blended = [MusicalKey: Double]()
+            for key in MusicalKey.allCases {
+                let a = audio.scores[key] ?? 0
+                let c = chordBlend[key] ?? 0
+                blended[key] = a * 0.70 + c * 0.30
+            }
+            blended[audio.key, default: 0] += audio.confidence * 0.18
+            if !normalized.isEmpty {
+                WorshipAutoKeyRules.applyScoreBoost(symbols: normalized, into: &blended)
+            }
+
+            let ranked = blended.sorted { $0.value > $1.value }
+            let plausible = ranked.first { candidate in
+                guard hasChordEvidence else { return true }
+                return !KeyChordAnalysis.isImplausibleLiveKeyCandidate(
+                    symbols: normalized,
+                    candidate: candidate.key
+                )
+            }
+            if let best = plausible, best.value > 0.12 {
+                var confidence = max(audio.confidence, min(1, best.value))
+                if best.key == audio.key {
+                    confidence = max(confidence, audio.confidence)
+                }
+                let scale: MusicalScaleQuality
+                if best.key == audio.key {
+                    let chordScale = TonalScaleIntelligence.inferScale(from: normalized, tonic: best.key)
+                    scale = (chordScale == .major || chordScale == .naturalMinor)
+                        ? audio.scale
+                        : chordScale
+                } else {
+                    scale = TonalScaleIntelligence.inferScale(from: normalized, tonic: best.key)
+                }
+                let source: AdaptiveKeyDetection.Source =
+                    best.key == audio.key ? .audio : .ensemble
+                return AdaptiveKeyDetection(
+                    key: best.key,
+                    scale: scale,
+                    confidence: confidence,
+                    source: source
+                )
+            }
+
+            return AdaptiveKeyDetection(
+                key: audio.key,
+                scale: audio.scale,
+                confidence: audio.confidence,
+                source: .audio,
+                relativeKey: audio.relativeKey
+            )
+        }
+
+        // ── Fallback: chords only (pad / no mic / no MIDI chroma yet) ──────────
+        guard normalized.count >= Self.minimumSymbols else { return nil }
+        return resolveSoftChordDetection(
+            scores: chordBlend,
+            symbols: normalized,
+            preferSource: .ensemble
+        )
+    }
+
+    /// Explicit theory anchors from the live chord window — override audio when present.
+    private func strongChordAnchorDetection(from normalized: [String]) -> AdaptiveKeyDetection? {
+        guard normalized.count >= 3 else { return nil }
+
+        func pack(_ key: MusicalKey, confidence: Double) -> AdaptiveKeyDetection {
+            let scale = TonalScaleIntelligence.inferScale(from: normalized, tonic: key)
+            return AdaptiveKeyDetection(
+                key: key,
+                scale: scale,
+                confidence: confidence,
+                source: .ensemble
+            )
+        }
+
         if WorshipAutoKeyRules.hasTwoLoopEvidence(normalized),
            let worshipKey = WorshipAutoKeyRules.resolveKey(from: normalized),
            !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: worshipKey) {
-            return AdaptiveKeyDetection(key: worshipKey, confidence: 0.88, source: .ensemble)
+            return pack(worshipKey, confidence: 0.90)
         }
+        if let tonicPC = KeyChordAnalysis.establishedMajorFamilyTonic(in: normalized),
+           let tonicKey = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return pack(tonicKey, confidence: 0.88)
+        }
+        if let tonicPC = KeyChordAnalysis.establishedMajorTonicFromIAndV7(in: normalized),
+           let tonicKey = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return pack(tonicKey, confidence: 0.86)
+        }
+        if let tonicPC = KeyChordAnalysis.authenticDominantCadenceDestination(in: normalized),
+           let tonicKey = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return pack(tonicKey, confidence: 0.84)
+        }
+        if let tonicPC = KeyChordAnalysis.establishedMinorTonic(in: normalized),
+           let tonicKey = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return pack(tonicKey, confidence: 0.82)
+        }
+        return nil
+    }
 
-        // Market-grade MIR ensemble (KS, Temperley, functions, fifths, templates, HMM).
+    private func softChordScores(from normalized: [String], sessionName: String?) -> [MusicalKey: Double] {
+        guard normalized.count >= 3 else { return [:] }
+
+        let memoryHit = recallMemory(
+            fingerprint: KeyChordAnalysis.fingerprint(from: normalized),
+            sessionName: sessionName
+        )
+        let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
+            liveSymbols: normalized,
+            library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
+        )
         let intelligence = LiveKeyIntelligence.analyze(symbols: normalized)
         let heuristic = KeyDetector.detect(from: normalized)
         let neural = neuralScores(from: normalized)
-        let audio = freshAudioHint()
 
         var blended = [MusicalKey: Double]()
         for key in MusicalKey.allCases {
             let intel = intelligence?.scores[key] ?? 0
             let h = heuristic?.key == key ? (heuristic?.confidence ?? 0) : 0
             let n = neural[key] ?? 0
-            let a = audio?.scores[key] ?? 0
-            // Chord intelligence leads; audio chroma + neural refine live lock.
-            blended[key] = intel * 0.58 + h * 0.16 + n * 0.14 + a * 0.12
+            blended[key] = intel * 0.62 + h * 0.22 + n * 0.16
         }
         WorshipAutoKeyRules.applyScoreBoost(symbols: normalized, into: &blended)
 
-        if let libraryHit = KeyChordAnalysis.bestLibraryKeyMatch(
-            liveSymbols: normalized,
-            library: libraryHints.map { ($0.name, $0.key, $0.symbols) }
-        ) {
-            blended[libraryHit.key, default: 0] += libraryHit.similarity * 0.28
+        if let libraryHit,
+           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: libraryHit.key) {
+            blended[libraryHit.key, default: 0] += libraryHit.similarity * 0.18
+        }
+        if let memoryHit,
+           !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: memoryHit) {
+            blended[memoryHit, default: 0] += 0.12
+        }
+        return blended
+    }
+
+    private func resolveSoftChordDetection(
+        scores: [MusicalKey: Double],
+        symbols: [String],
+        preferSource: AdaptiveKeyDetection.Source
+    ) -> AdaptiveKeyDetection? {
+        func detection(for key: MusicalKey, confidence: Double, source: AdaptiveKeyDetection.Source) -> AdaptiveKeyDetection {
+            let scale = TonalScaleIntelligence.inferScale(from: symbols, tonic: key)
+            return AdaptiveKeyDetection(key: key, scale: scale, confidence: confidence, source: source)
         }
 
-        if let audio {
-            blended[audio.key, default: 0] += audio.confidence * 0.10
-        }
-
-        let ranked = blended.sorted { $0.value > $1.value }
-        let plausible = ranked.first {
-            !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: $0.key)
-        }
-        guard let best = plausible ?? ranked.first, best.value > 0.18,
-              ranked.count >= 2 else {
-            if let intelligence, intelligence.confidence >= 0.14,
-               !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: intelligence.bestKey) {
-                return AdaptiveKeyDetection(
-                    key: intelligence.bestKey,
-                    confidence: intelligence.confidence,
-                    source: .ensemble
-                )
+        guard !scores.isEmpty else {
+            let intelligence = LiveKeyIntelligence.analyze(symbols: symbols)
+            if let intelligence,
+               !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: intelligence.bestKey),
+               intelligence.confidence >= 0.14 {
+                return detection(for: intelligence.bestKey, confidence: intelligence.confidence, source: preferSource)
             }
-            return heuristic.map {
-                AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
+            return KeyDetector.detect(from: symbols).flatMap { result -> AdaptiveKeyDetection? in
+                guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) else {
+                    return nil
+                }
+                return detection(for: result.key, confidence: result.confidence, source: .heuristic)
+            }
+        }
+
+        let ranked = scores.sorted { $0.value > $1.value }
+        let plausible = ranked.first {
+            !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: $0.key)
+        }
+        guard let best = plausible, best.value > 0.18, ranked.count >= 2 else {
+            let intelligence = LiveKeyIntelligence.analyze(symbols: symbols)
+            if let intelligence,
+               !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: intelligence.bestKey),
+               intelligence.confidence >= 0.14 {
+                return detection(for: intelligence.bestKey, confidence: intelligence.confidence, source: preferSource)
+            }
+            return KeyDetector.detect(from: symbols).flatMap { result -> AdaptiveKeyDetection? in
+                guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) else {
+                    return nil
+                }
+                return detection(for: result.key, confidence: result.confidence, source: .heuristic)
             }
         }
 
         let resolved = KeyChordAnalysis.resolveLiveTonalCenter(
-            symbols: normalized,
-            scores: blended,
+            symbols: symbols,
+            scores: scores,
             currentBest: best.key
         )
-        let resolvedValue = blended[resolved] ?? best.value
-        let runnerUp = ranked.first(where: { $0.key != resolved })?.value ?? ranked[1].value
-        let margin = resolvedValue - runnerUp
-        var confidence = min(1, max(0.15, margin / max(resolvedValue, 0.01)))
-        if let intelligence, intelligence.bestKey == resolved {
-            confidence = max(confidence, intelligence.confidence * 0.92)
-        }
-        if let audio, audio.key == resolved {
-            confidence = min(1, confidence + audio.confidence * 0.08)
-        }
-
-        guard confidence >= 0.14 || resolvedValue >= 0.48 else {
-            return heuristic.map {
-                AdaptiveKeyDetection(key: $0.key, confidence: $0.confidence, source: .heuristic)
-            }
-        }
-
-        if KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: normalized, candidate: resolved) {
+        guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: resolved) else {
             return nil
         }
 
-        let source: AdaptiveKeyDetection.Source =
-            (audio?.key == resolved && (audio?.confidence ?? 0) >= 0.4 && confidence < 0.5)
-            ? .audio
-            : .ensemble
-        return AdaptiveKeyDetection(key: resolved, confidence: confidence, source: source)
+        let resolvedValue = scores[resolved] ?? best.value
+        let runnerUp = ranked.first(where: { $0.key != resolved })?.value ?? ranked[1].value
+        let margin = resolvedValue - runnerUp
+        var confidence = min(1, max(0.15, margin / max(resolvedValue, 0.01)))
+        if let intelligence = LiveKeyIntelligence.analyze(symbols: symbols),
+           intelligence.bestKey == resolved {
+            confidence = max(confidence, intelligence.confidence * 0.92)
+        }
+
+        guard confidence >= 0.14 || resolvedValue >= 0.48 else {
+            return KeyDetector.detect(from: symbols).flatMap { result -> AdaptiveKeyDetection? in
+                guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) else {
+                    return nil
+                }
+                return detection(for: result.key, confidence: result.confidence, source: .heuristic)
+            }
+        }
+
+        return detection(for: resolved, confidence: confidence, source: preferSource)
     }
 
     private func freshAudioHint() -> AudioKeyHint? {
         guard let hint = audioKeyHint else { return nil }
-        // Discard stale chroma (>8s) so silent/old audio doesn't poison detection.
-        guard Date().timeIntervalSince1970 - hint.updatedAt <= 8 else {
+        guard Date().timeIntervalSince1970 - hint.updatedAt <= 5 else {
             audioKeyHint = nil
             return nil
         }
@@ -416,7 +664,10 @@ final class AdaptiveKeyLearningEngine {
     }
 
     private func normalizedSymbols(_ symbols: [String]) -> [String] {
-        symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        // Keep slash-bass inversions (C/E) — theory helpers strip when they need the chord body.
+        symbols
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     // MARK: - Persistence

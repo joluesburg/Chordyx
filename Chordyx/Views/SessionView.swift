@@ -3172,6 +3172,15 @@ struct SessionView: View {
         .platformSheet(isPresented: $isKeyMenuPresented) {
             SessionMusicalKeyPicker(viewModel: viewModel, isPresented: $isKeyMenuPresented)
         }
+        .contextMenu {
+            if viewModel.payload.autoDetectKey {
+                Button {
+                    viewModel.releaseAutoKeyFollow()
+                } label: {
+                    Label(String(localized: "Re-listen"), systemImage: "arrow.counterclockwise")
+                }
+            }
+        }
     }
 
     private func controlChip(icon: String, title: String, fillWidth: Bool = false) -> some View {

@@ -7,7 +7,17 @@ import Foundation
 
 enum ScaleHint {
     /// Suggested scale for soloing over the active chord in the song key.
-    static func hint(for chordSymbol: String, songKey: MusicalKey) -> String {
+    static func hint(
+        for chordSymbol: String,
+        songKey: MusicalKey,
+        detectedScale: MusicalScaleQuality? = nil
+    ) -> String {
+        // Prefer the live Auto AI song scale when present (strongest market signal).
+        if let detectedScale {
+            let tonicName = noteName(songKey.pitchClass, preferFlats: songKey.prefersFlats)
+            return "\(tonicName) \(detectedScale.localizedName)"
+        }
+
         guard let (root, suffix) = Transposer.parse(chordSymbol),
               let rootPC = Transposer.pitchClass(ofRoot: root) else {
             return pentatonicLabel(for: songKey)

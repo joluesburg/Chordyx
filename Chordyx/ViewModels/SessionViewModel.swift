@@ -97,24 +97,25 @@ final class SessionViewModel: ObservableObject {
     private var keyReviewTask: Task<Void, Never>?
     private var lastPeriodicKeyReviewAt: TimeInterval = 0
     private var lastAutoKeyConfidence: Double = 0
-    /// Confidence of the key currently locked via Auto-detect (for flip hysteresis).
+    /// Confidence of the key currently shown via Auto-detect (display only — not a hard lock).
     private var lockedAutoKeyConfidence: Double = 0
     private var lastAudioKeyDetectAttemptAt: TimeInterval = 0
     /// Chronological chord plays (with repeats) for Auto-key — not the unique MRU ring order.
     private var liveKeyChordHistory: [String] = []
-    private static let liveKeyChordHistoryLimit = 32
+    private static let liveKeyChordHistoryLimit = 48
+    /// Live follow window — only the most recent chords drive the key so modulation can flip fast.
+    private static let autoKeyLiveWindowSize = 10
     /// Wall-clock when Auto-key was armed for this session (cooldown before first announce).
     private var autoKeyArmedAt: TimeInterval = 0
-    private static let autoKeyAnnounceCooldownSeconds: TimeInterval = 2.5
-    /// Adaptive re-score while Auto key is on (tightens when uncertain).
-    private static let keyReviewIntervalFastSeconds: TimeInterval = 5
-    private static let keyReviewIntervalNormalSeconds: TimeInterval = 10
-    private static let keyReviewIntervalStableSeconds: TimeInterval = 16
-    /// Minimum confidence before treating a candidate as a committed Auto key.
-    /// Kept above soft "no progression yet" caps so we never announce from scale-degree noise.
-    private static let autoKeyCommitConfidence: Double = 0.48
-    /// Challenger must clear the locked key by this margin (unless trusted source / absolute floor).
-    private static let autoKeyFlipMargin: Double = 0.14
+    private static let autoKeyAnnounceCooldownSeconds: TimeInterval = 1.5
+    /// Continuous live follow — stay snappy; never slow down into a "locked forever" cadence.
+    private static let keyReviewIntervalFastSeconds: TimeInterval = 2.0
+    private static let keyReviewIntervalNormalSeconds: TimeInterval = 3.0
+    private static let keyReviewIntervalStableSeconds: TimeInterval = 4.0
+    /// Minimum confidence before treating a candidate as a live Auto key.
+    private static let autoKeyCommitConfidence: Double = 0.42
+    /// Soft bounce only — Auto AI follows, it does not hard-lock a letter.
+    private static let autoKeyFlipMargin: Double = 0.04
     private lazy var progressionInference = ProgressionInferenceEngine()
     /// True after a repeating live loop was auto-applied to `payload.chords`.
     var hasInferredLiveProgression: Bool {
@@ -378,36 +379,85 @@ final class SessionViewModel: ObservableObject {
         return displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
     }
 
-    /// Header label: no tonic letter until Auto-key commits (Re for D, not a leftover E/Mi).
+    /// Header label: live follow with key + scale/mode.
     func autoKeyHeadline(isGuest: Bool) -> String {
         if payload.autoDetectKey, !payload.isKeyAutoDetected {
-            return String(localized: "Detecting key…")
+            return String(localized: "Listening for key & scale…")
         }
         let glyph = displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
         if payload.autoDetectKey {
-            return String(format: String(localized: "Key of %@ · AI"), glyph)
+            if let scale = payload.detectedScale {
+                let labeled = "\(glyph) \(scale.localizedName)"
+                if let relative = payload.detectedRelativeKey {
+                    let relGlyph = displayNotation(isGuest: isGuest).cycleGlyph(for: relative)
+                    return String(
+                        format: String(localized: "Following %@ · rel. %@ · Live AI"),
+                        labeled,
+                        relGlyph
+                    )
+                }
+                return String(format: String(localized: "Following %@ · Live AI"), labeled)
+            }
+            return String(format: String(localized: "Following %@ · Live AI"), glyph)
         }
         return String(format: String(localized: "Key of %@"), glyph)
     }
 
-    /// Compact control-chip title — same no-letter-while-listening rule.
+    /// Compact control-chip title — live follow wording.
     func autoKeyControlTitle(isGuest: Bool) -> String {
         if payload.autoDetectKey, !payload.isKeyAutoDetected {
-            return String(localized: "Key · AI listening")
+            return String(localized: "Key · Live AI")
         }
         let glyph = displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
         if payload.autoDetectKey {
-            return String(format: String(localized: "Key %@ · AI"), glyph)
+            if let scale = payload.detectedScale {
+                return "\(glyph) \(scale.shortLabel)"
+            }
+            return String(format: String(localized: "%@ · Live"), glyph)
         }
         return String(format: String(localized: "Key %@"), glyph)
     }
 
-    /// True when `liveChordSymbol` is a bare letter/power dyad (note), not a triad/seventh.
+    /// Scale / mode line for Auto panels (nil while still listening).
+    func autoKeyScaleCaption(isGuest: Bool) -> String? {
+        guard payload.autoDetectKey, payload.isKeyAutoDetected,
+              let scale = payload.detectedScale else { return nil }
+        let glyph = displayNotation(isGuest: isGuest).cycleGlyph(for: payload.key)
+        var line = "\(glyph) \(scale.localizedName)"
+        if let relative = payload.detectedRelativeKey {
+            let relGlyph = displayNotation(isGuest: isGuest).cycleGlyph(for: relative)
+            line += " · \(String(format: String(localized: "rel. %@"), relGlyph))"
+        }
+        return line
+    }
+
+    /// True only for melody single-note labels that must not drive Auto-key alone.
+    /// Major triads from MIDI often appear as bare letters ("C", "G") — those are valid.
+    /// Inversions ("C/E") and qualities ("Am7", "G7") are always valid.
     static func isBareNoteLiveSymbol(_ symbol: String?) -> Bool {
         guard let symbol, !symbol.isEmpty else { return false }
+        // Never treat inversions or explicit qualities as bare.
+        if symbol.contains("/") { return false }
         guard let parsed = Transposer.parse(symbol) else { return true }
         let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines)
-        return suffix.isEmpty || suffix == "5"
+        // Bare letter without voicing context is filtered upstream via pitchClassCount.
+        // Here we only drop nothing by default — majors must reach Auto-key.
+        _ = suffix
+        return false
+    }
+
+    /// True when a symbol is a lone pitch-class letter with no quality (melody).
+    /// Used only when we already know pitchClassCount < 3.
+    static func isMelodyLetterSymbol(_ symbol: String?) -> Bool {
+        guard let symbol, !symbol.isEmpty else { return false }
+        if symbol.contains("/") { return false }
+        guard let parsed = Transposer.parse(symbol) else { return true }
+        let suffix = parsed.suffix
+            .split(separator: "/", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return suffix.isEmpty
     }
 
     func effectiveDisplayMode(isGuest: Bool) -> SessionDisplayMode {
@@ -421,7 +471,11 @@ final class SessionViewModel: ObservableObject {
 
     var activeScaleHint: String? {
         guard let chord = activeChord else { return nil }
-        return ScaleHint.hint(for: chord.symbolName, songKey: payload.key)
+        return ScaleHint.hint(
+            for: chord.symbolName,
+            songKey: payload.key,
+            detectedScale: payload.detectedScale
+        )
     }
 
     var setlistTimelineTitles: [String] {
@@ -996,9 +1050,26 @@ final class SessionViewModel: ObservableObject {
                 pitchClassCount: pcs.count,
                 guitarMode: guitarMode
             )
-            self.applyFreestyleSideEffects(for: symbol, contributesToKeyAndProgression: isChord)
-            if self.payload.autoDetectKey, isChord {
-                self.maybeAutoDetectKey()
+            // Always feed raw MIDI pitch classes into Auto AI (scale + key chroma).
+            if self.payload.autoDetectKey {
+                let bass = currentNotes.min().map { PianoNote.pitchClass(forStored: $0) }
+                AdaptiveKeyLearningEngine.shared.ingestMIDIVoicing(
+                    pitchClasses: Array(pcs),
+                    bassPitchClass: bass
+                )
+            }
+            let evidenceSymbol = KeyChordAnalysis.keyEvidenceSymbol(
+                displaySymbol: symbol,
+                noteIndices: currentNotes,
+                preferFlats: self.payload.key.prefersFlats
+            )
+            self.applyFreestyleSideEffects(
+                for: isChord ? evidenceSymbol : symbol,
+                contributesToKeyAndProgression: isChord
+            )
+            if self.payload.autoDetectKey {
+                // MIDI chroma alone can speak even before a full progression window.
+                self.maybeAutoDetectKey(forcePeriodicReview: true)
             }
             self.updatePianoChartMismatch()
             #if os(macOS) || os(iOS)
@@ -1253,13 +1324,12 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func appendLiveKeyChordHistory(_ symbol: String) {
-        let normalized = LiveRing.normalize(symbol)
-        guard !normalized.isEmpty else { return }
-        // Bare letters / power dyads are melody noise — never feed Auto-key.
-        if SessionViewModel.isBareNoteLiveSymbol(normalized) { return }
-        // Avoid flooding history when the same triad is held/retriggered continuously.
-        if liveKeyChordHistory.last == normalized { return }
-        liveKeyChordHistory.append(normalized)
+        // Keep inversions (C/E) and major letters (C, G) — do not strip slash for Auto-key.
+        let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Avoid flooding history when the same voicing is held/retriggered continuously.
+        if liveKeyChordHistory.last == trimmed { return }
+        liveKeyChordHistory.append(trimmed)
         if liveKeyChordHistory.count > Self.liveKeyChordHistoryLimit {
             liveKeyChordHistory = Array(liveKeyChordHistory.suffix(Self.liveKeyChordHistoryLimit))
         }
@@ -1289,19 +1359,28 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func liveRingSymbolsForKeyDetection() -> [String] {
-        // Prefer chronological progression (with repeats) so cadences / templates work.
+        // Prefer chronological progression (with repeats + inversions) so cadences / templates work.
         var symbols = liveKeyChordHistory
         if symbols.isEmpty {
             symbols = payload.liveRingRecentOrder.map { payload.liveRingCanonicalSymbols[$0] ?? $0 }
         }
-        if symbols.isEmpty {
-            symbols = payload.freestyleChordSymbols
+        // Always merge freestyle / pad chords — they are what the host sees and taps.
+        let freestyle = payload.freestyleChordSymbols
+        if !freestyle.isEmpty {
+            var seen = Set(symbols.map { LiveRing.normalize($0) })
+            for symbol in freestyle {
+                let n = LiveRing.normalize(symbol)
+                guard !n.isEmpty, !seen.contains(n) else { continue }
+                symbols.append(symbol)
+                seen.insert(n)
+            }
         }
-        // Strip bare letters / power dyads that may still sit in freestyle ring state.
-        symbols = symbols.filter { !Self.isBareNoteLiveSymbol($0) }
-        // Do not append bare live single-note letters — they poison Auto-key (Dm melody → "E"/Mi).
-        if symbols.count > 24 {
-            symbols = Array(symbols.suffix(24))
+        if symbols.isEmpty {
+            symbols = freestyle
+        }
+        // Live follow window: recent chords only, so a new key can replace an old one quickly.
+        if symbols.count > Self.autoKeyLiveWindowSize {
+            symbols = Array(symbols.suffix(Self.autoKeyLiveWindowSize))
         }
         return symbols
     }
@@ -1346,16 +1425,17 @@ final class SessionViewModel: ObservableObject {
         guard let key = livePerformanceFusion.estimatedAudioKey else { return }
         AdaptiveKeyLearningEngine.shared.updateAudioKeyHint(
             key: key,
+            scale: livePerformanceFusion.estimatedAudioScale,
             confidence: livePerformanceFusion.audioKeyConfidence,
-            scores: livePerformanceFusion.audioKeyScores
+            scores: livePerformanceFusion.audioKeyScores,
+            relativeKey: livePerformanceFusion.estimatedAudioRelativeKey
         )
-        // Soft re-check only when audio is clearly assertive AND we already have chord progression evidence.
-        guard livePerformanceFusion.audioKeyConfidence >= 0.62 else { return }
-        guard KeyChordAnalysis.hasProgressionEvidence(liveRingSymbolsForKeyDetection()) else { return }
+        // Audio-first: re-score as soon as mic has a usable estimate — don't wait for chord gates.
+        guard livePerformanceFusion.audioKeyConfidence >= 0.16 else { return }
         let now = Date().timeIntervalSince1970
-        guard now - lastAudioKeyDetectAttemptAt >= 3.0 else { return }
+        guard now - lastAudioKeyDetectAttemptAt >= 0.75 else { return }
         lastAudioKeyDetectAttemptAt = now
-        maybeAutoDetectKey()
+        maybeAutoDetectKey(forcePeriodicReview: true)
         #endif
     }
 
@@ -1384,9 +1464,13 @@ final class SessionViewModel: ObservableObject {
             pendingDetectedKey = nil
             pendingDetectedKeyHits = 0
             payload.isKeyAutoDetected = true
+            payload.detectedScale = decision.scale
+            payload.detectedRelativeKey = decision.relativeKey
             symbolsAtLastAutoKeyDetection = symbols
             keyUsedForAutoDetection = payload.key
-            lockedAutoKeyConfidence = max(lockedAutoKeyConfidence, decision.confidence)
+            // Live follow: track current confidence; don't ratchet a permanent lock ceiling.
+            lockedAutoKeyConfidence = decision.confidence
+            lastAutoKeyConfidence = decision.confidence
 
         case .accumulatePending(let key, let hits):
             pendingDetectedKey = key
@@ -1395,6 +1479,8 @@ final class SessionViewModel: ObservableObject {
         case .commit(let key, let source):
             applyAutoDetectedKeyChange(
                 to: key,
+                scale: decision.scale,
+                relativeKey: decision.relativeKey,
                 from: symbols,
                 confidence: decision.confidence,
                 source: source,
@@ -1413,9 +1499,11 @@ final class SessionViewModel: ObservableObject {
     struct AutoKeyCommitDecision: Equatable {
         let action: AutoKeyCommitAction
         let confidence: Double
+        let scale: MusicalScaleQuality
+        let relativeKey: MusicalKey?
     }
 
-    /// Same gates `maybeAutoDetectKey` uses — call this from tests with live-style symbol streams.
+    /// Continuous live-follow policy: mic leads (Auto-Key style); chords reinforce / hard-veto.
     static func evaluateAutoKeyCommit(
         symbols: [String],
         currentKey: MusicalKey,
@@ -1429,49 +1517,77 @@ final class SessionViewModel: ObservableObject {
         now: TimeInterval,
         detect: (([String], String?) -> AdaptiveKeyDetection?)? = nil
     ) -> AutoKeyCommitDecision? {
-        guard KeyChordAnalysis.hasProgressionEvidence(symbols) else { return nil }
-        // Cooldown after session start — avoid stale memory / early noise locking a letter.
+        // Short arming cooldown only — then stay live for the whole session.
         if !isKeyAutoDetected, armedAt > 0, now - armedAt < autoKeyAnnounceCooldownSeconds {
             return nil
         }
 
         let detector = detect ?? { _, _ in nil }
         guard let result = detector(symbols, sessionName) else { return nil }
-        guard !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) else {
+
+        let hasChordEvidence = KeyChordAnalysis.hasProgressionEvidence(symbols)
+        // Without a real progression, mic or MIDI controller chroma may announce a letter.
+        if !hasChordEvidence {
+            let chromaOK = (result.source == .audio || result.source == .midi)
+                && result.confidence >= 0.20
+            guard chromaOK else { return nil }
+        } else if KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key) {
             return nil
         }
 
+        let currentImplausible = isKeyAutoDetected
+            && hasChordEvidence
+            && KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: currentKey)
+
+        let anchoredNewKey =
+            (KeyChordAnalysis.establishedMajorFamilyTonic(in: symbols)
+                ?? KeyChordAnalysis.establishedMajorTonicFromIAndV7(in: symbols)
+                ?? KeyChordAnalysis.authenticDominantCadenceDestination(in: symbols))
+            .flatMap { pc in MusicalKey.allCases.first { $0.pitchClass == pc } }
+        let clearModulation = anchoredNewKey == result.key && result.key != currentKey
+        let audioFlip = (result.source == .audio || result.source == .midi)
+            && result.key != currentKey
+            && result.confidence >= 0.20
+
         if result.key == currentKey {
-            if result.confidence >= autoKeyCommitConfidence {
-                return AutoKeyCommitDecision(action: .reinforceSameKey, confidence: result.confidence)
+            if result.confidence >= autoKeyCommitConfidence
+                || clearModulation
+                || currentImplausible
+                || result.source == .audio
+                || result.source == .midi {
+                return AutoKeyCommitDecision(
+                    action: .reinforceSameKey,
+                    confidence: result.confidence,
+                    scale: result.scale,
+                    relativeKey: result.relativeKey
+                )
             }
             return nil
         }
 
-        let trustedSource = result.source == .library
-            || (result.source == .ensemble && result.confidence >= 0.58)
-            || (result.source == .memory && result.confidence >= 0.85
-                && !KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: result.key))
-
-        let minCommit = isKeyAutoDetected
-            ? (result.source == .audio ? 0.62 : 0.50)
-            : autoKeyCommitConfidence
-        guard result.confidence >= minCommit || trustedSource else { return nil }
-
-        if forcePeriodicReview, isKeyAutoDetected {
-            let strongEnough = result.source == .library
-                || (result.source == .memory && result.confidence >= 0.85)
-                || result.confidence >= 0.62
-            guard strongEnough else { return nil }
+        let minCommit: Double
+        if clearModulation || currentImplausible || audioFlip {
+            minCommit = 0.18
+        } else if result.source == .audio || result.source == .midi {
+            minCommit = isKeyAutoDetected ? 0.20 : 0.24
+        } else if isKeyAutoDetected {
+            minCommit = 0.40
+        } else {
+            minCommit = autoKeyCommitConfidence
         }
+        guard result.confidence >= minCommit
+                || result.source == .ensemble
+                || clearModulation
+                || currentImplausible else { return nil }
 
-        if isKeyAutoDetected {
-            let flipMargin = result.source == .audio
-                ? autoKeyFlipMargin + 0.08
-                : autoKeyFlipMargin
-            let beatsLocked = result.confidence >= lockedConfidence + flipMargin
-            let absoluteFloor = trustedSource ? 0.62 : 0.68
-            guard beatsLocked || result.confidence >= absoluteFloor else { return nil }
+        // Instant follow: clear chord modulation OR confident mic/MIDI change.
+        if clearModulation || currentImplausible || (audioFlip && result.confidence >= 0.26) {
+            return AutoKeyCommitDecision(
+                action: .commit(key: result.key, source: result.source),
+                confidence: result.confidence,
+                scale: result.scale,
+                relativeKey: result.relativeKey
+            )
         }
 
         var nextHits = 1
@@ -1481,76 +1597,111 @@ final class SessionViewModel: ObservableObject {
             nextPending = result.key
         }
 
-        let isInitialGuess = !isKeyAutoDetected
-        // Memory never gets a 1-hit lock — teach-back of bad E must not win immediately.
-        // Library/memory must not 1-hit lock a letter (stale E from a previous jam).
-        let assertiveLock = (result.confidence >= 0.68 && trustedSource
-                             && result.source != .memory && result.source != .library)
-            || (result.source == .library && result.confidence >= 0.85)
         let requiredHits: Int
-        if assertiveLock {
-            requiredHits = (forcePeriodicReview && isKeyAutoDetected) ? 2 : 1
+        if result.source == .audio || result.source == .midi {
+            requiredHits = result.confidence >= 0.28 ? 1 : 2
         } else if result.source == .memory {
-            requiredHits = 3
-        } else if isInitialGuess, result.confidence >= 0.50 {
             requiredHits = 2
-        } else if result.confidence >= 0.55 {
-            requiredHits = 2
+        } else if result.confidence >= 0.50 || result.source == .ensemble {
+            requiredHits = 1
         } else {
-            requiredHits = 3
+            requiredHits = 2
+        }
+
+        if isKeyAutoDetected,
+           !forcePeriodicReview,
+           result.source != .audio,
+           result.source != .midi,
+           result.confidence + autoKeyFlipMargin < lockedConfidence,
+           result.confidence < 0.55 {
+            return AutoKeyCommitDecision(
+                action: .accumulatePending(key: nextPending, hits: nextHits),
+                confidence: result.confidence,
+                scale: result.scale,
+                relativeKey: result.relativeKey
+            )
         }
 
         if nextHits < requiredHits {
             return AutoKeyCommitDecision(
                 action: .accumulatePending(key: nextPending, hits: nextHits),
-                confidence: result.confidence
+                confidence: result.confidence,
+                scale: result.scale,
+                relativeKey: result.relativeKey
             )
         }
         return AutoKeyCommitDecision(
             action: .commit(key: result.key, source: result.source),
-            confidence: result.confidence
+            confidence: result.confidence,
+            scale: result.scale,
+            relativeKey: result.relativeKey
         )
     }
 
     private func applyAutoDetectedKeyChange(
         to newKey: MusicalKey,
+        scale: MusicalScaleQuality,
+        relativeKey: MusicalKey?,
         from symbols: [String],
         confidence: Double,
         source: AdaptiveKeyDetection.Source,
         preserveLiveRing: Bool = false
     ) {
         let keyChanged = newKey.pitchClass != payload.key.pitchClass
-        let hadLiveRing = !payload.freestyleChordSymbols.isEmpty || !payload.liveRingUsageCounts.isEmpty
-
-        if keyChanged, hadLiveRing, usesLiveFreestyleRing, !preserveLiveRing {
-            beginNewLiveRingSegment()
-            clearInferredLiveProgression(resetEngine: true)
-            if isLiveProgressionSession {
-                payload.chords = []
-                payload.activeChordID = nil
-                payload.beatsOnActiveChord = 0
-                updateActiveSection()
-            }
-        }
+        // Do NOT clear liveKeyChordHistory / freestyle when Auto-key flips letters.
 
         payload.key = newKey
         payload.isKeyAutoDetected = true
+        payload.detectedScale = scale
+        payload.detectedRelativeKey = relativeKey ?? scale.relativeKey(of: newKey)
         pendingDetectedKey = nil
         pendingDetectedKeyHits = 0
         symbolsAtLastAutoKeyDetection = symbols
         keyUsedForAutoDetection = newKey
         lockedAutoKeyConfidence = confidence
         lastAutoKeyConfidence = confidence
-        // Only reinforce memory when evidence is solid — avoid teaching wrong early locks.
-        if confidence >= 0.58
-            || source == .memory
-            || source == .library {
+        // After a modulation, keep only the recent window so the old key can't pull us back.
+        if keyChanged, liveKeyChordHistory.count > Self.autoKeyLiveWindowSize / 2 {
+            liveKeyChordHistory = Array(liveKeyChordHistory.suffix(Self.autoKeyLiveWindowSize / 2))
+        }
+        // Only reinforce memory when evidence is solid — never teach Mi from mic/MIDI chroma alone.
+        if source != .audio,
+           source != .midi,
+           confidence >= 0.58 || source == .memory || source == .library {
             AdaptiveKeyLearningEngine.shared.confirmDetection(
                 symbols: symbols,
                 key: newKey,
                 sessionName: payload.sessionName
             )
         }
+        _ = preserveLiveRing
+        sync()
+    }
+
+    /// Host: clear the current Auto letter and resume fresh live listening (modulation / stuck key).
+    func releaseAutoKeyFollow() {
+        guard canDriveSession, payload.autoDetectKey else { return }
+        payload.isKeyAutoDetected = false
+        pendingDetectedKey = nil
+        pendingDetectedKeyHits = 0
+        lockedAutoKeyConfidence = 0
+        lastAutoKeyConfidence = 0
+        symbolsAtLastAutoKeyDetection = []
+        keyUsedForAutoDetection = nil
+        payload.detectedScale = nil
+        payload.detectedRelativeKey = nil
+        autoKeyArmedAt = Date().timeIntervalSince1970
+        // Keep recent chords so the next family can re-lock quickly.
+        if liveKeyChordHistory.count > Self.autoKeyLiveWindowSize {
+            liveKeyChordHistory = Array(liveKeyChordHistory.suffix(Self.autoKeyLiveWindowSize))
+        }
+        AdaptiveKeyLearningEngine.shared.clearAudioKeyHint()
+        AdaptiveKeyLearningEngine.shared.clearMIDIChroma()
+        #if os(macOS) || os(iOS)
+        livePerformanceFusion.resetAudioKeyListening()
+        #endif
+        objectWillChange.send()
+        maybeAutoDetectKey(forcePeriodicReview: true)
         sync()
     }
 
@@ -1571,18 +1722,12 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// Faster reviews until Auto key locks with solid confidence; slower once stable.
+    /// Live follow: keep reviewing on a short cadence so modulations are caught quickly.
     private func adaptiveKeyReviewIntervalSeconds() -> TimeInterval {
-        if !payload.isKeyAutoDetected {
+        if !payload.isKeyAutoDetected || lastAutoKeyConfidence < 0.50 {
             return Self.keyReviewIntervalFastSeconds
         }
-        if lastAutoKeyConfidence < 0.35 {
-            return Self.keyReviewIntervalFastSeconds
-        }
-        if lastAutoKeyConfidence < 0.55 {
-            return Self.keyReviewIntervalNormalSeconds
-        }
-        return Self.keyReviewIntervalStableSeconds
+        return Self.keyReviewIntervalNormalSeconds
     }
 
     private func stopPeriodicKeyReview() {
@@ -1597,10 +1742,31 @@ final class SessionViewModel: ObservableObject {
             return
         }
         let symbols = liveRingSymbolsForKeyDetection()
-        guard symbols.count >= 3 else { return }
+        #if os(macOS) || os(iOS)
+        let hasAudio = livePerformanceFusion.audioKeyConfidence >= 0.16
+            && livePerformanceFusion.estimatedAudioKey != nil
+        #else
+        let hasAudio = false
+        #endif
+        guard symbols.count >= 3 || hasAudio else { return }
 
-        // Skip if nothing new since the last applied detection.
-        if symbols == symbolsAtLastAutoKeyDetection, payload.isKeyAutoDetected {
+        let currentImplausible = payload.isKeyAutoDetected
+            && KeyChordAnalysis.hasProgressionEvidence(symbols)
+            && KeyChordAnalysis.isImplausibleLiveKeyCandidate(symbols: symbols, candidate: payload.key)
+
+        // Skip only when the window is unchanged, letter still fits, and mic isn't pushing a new key.
+        #if os(macOS) || os(iOS)
+        let audioDisagrees = hasAudio
+            && payload.isKeyAutoDetected
+            && livePerformanceFusion.estimatedAudioKey != payload.key
+            && livePerformanceFusion.audioKeyConfidence >= 0.22
+        #else
+        let audioDisagrees = false
+        #endif
+        if symbols == symbolsAtLastAutoKeyDetection,
+           payload.isKeyAutoDetected,
+           !currentImplausible,
+           !audioDisagrees {
             return
         }
 

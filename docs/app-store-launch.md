@@ -11,7 +11,7 @@ Use this as the single source of truth to ship **1.1** to the public App Store.
 
 ---
 
-## Status snapshot (as of Aug 25, 2026)
+## Status snapshot (as of Aug 27, 2026)
 
 | Item | Status |
 |------|--------|
@@ -21,7 +21,8 @@ Use this as the single source of truth to ship **1.1** to the public App Store.
 | Local Network / Bluetooth / Camera / Photos / Mic usage strings | Ready |
 | App Store copy EN/ES | Ready in `app-store-copy.md` |
 | Privacy HTML in repo | Ready in `docs/privacy.html` |
-| GitHub Pages live URL | **Blocked — 404** (enable Pages) |
+| GitHub Pages live URL | **Live** — https://joluesburg.github.io/Chordyx/privacy.html |
+| Live Auto AI (MIDI + mic + scale/mode + Re-listen) | **In code** — validate on device before submit |
 | Screenshots 6.7" + 12.9" | **You must capture** |
 | Paid Apps Agreement / banking | **You in App Store Connect** |
 | Age rating / App Privacy answers | **You in App Store Connect** |
@@ -31,17 +32,14 @@ Use this as the single source of truth to ship **1.1** to the public App Store.
 
 ## Phase 0 — Unblock App Store Connect (do first)
 
-### 0.1 Enable GitHub Pages (required for Privacy Policy URL)
+### 0.1 Privacy Policy URL
 
-1. Open https://github.com/joluesburg/Chordyx/settings/pages  
-2. **Source:** Deploy from a branch  
-3. **Branch:** `joluesburg` (or `main` if you rename) → folder **`/docs`**  
-4. Save → wait 1–2 minutes  
-5. Confirm these load in Safari:
-   - https://joluesburg.github.io/Chordyx/
-   - https://joluesburg.github.io/Chordyx/privacy.html  
+**Done.** Privacy policy is live:
 
-Without a live Privacy Policy URL, Apple rejects the submission.
+- https://joluesburg.github.io/Chordyx/
+- https://joluesburg.github.io/Chordyx/privacy.html
+
+Use that Privacy Policy URL in App Store Connect.
 
 ### 0.2 App Store Connect account setup
 
@@ -160,6 +158,8 @@ From `testflight-checklist.md` **P0** on two real devices:
 - [ ] Live ring readable on stage distance  
 - [ ] Metronome  
 - [ ] Privacy URL opens in Safari  
+- [ ] Auto AI: play a clear major progression (e.g. D–G–A–Bm) → key follows; modulate → updates or Re-listen works  
+- [ ] Auto AI: MIDI majors + an inversion still feed key (not stuck on wrong letter)  
 
 ---
 
@@ -173,7 +173,7 @@ From `testflight-checklist.md` **P0** on two real devices:
 
 | Risk | Mitigation |
 |------|------------|
-| Privacy URL 404 | Enable GitHub Pages before submit |
+| Privacy URL 404 | **Resolved** — Pages live at joluesburg.github.io/Chordyx/privacy.html |
 | Reviewer can’t test Multipeer | Clear Review Notes + offer second device / demo video |
 | Mic string mentions removed Solo Drums | Updated — optional on-device analysis only |
 | Icon transparency | Icons flattened to opaque RGB |

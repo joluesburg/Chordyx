@@ -380,6 +380,34 @@
         }
       }
     },
+    "%@ · Live" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Live"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · En vivo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Live"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Ao vivo"
+          }
+        }
+      }
+    },
     "%@ (Practice)" : {
       "localizations" : {
         "en" : {
@@ -2829,6 +2857,7 @@
     },
     "AI learns the key from your chord playing once the session starts." : {
       "comment" : "A description of how the AI determines the key of a session.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4792,6 +4821,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tríades para iniciantes"
+          }
+        }
+      }
+    },
+    "blues" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "blues"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "blues"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "blues"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "blues"
           }
         }
       }
@@ -8698,6 +8755,7 @@
     },
     "Detected from your playing" : {
       "comment" : "A label that describes the detected key based on the user's playing.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9132,6 +9190,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Concluir adição de acordes"
+          }
+        }
+      }
+    },
+    "Dorian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dorian"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dórico"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dorien"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dórico"
           }
         }
       }
@@ -10843,6 +10929,148 @@
         }
       }
     },
+    "Following %@ · Live AI" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following %@ · Live AI"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiendo %@ · IA en vivo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suit %@ · IA live"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguindo %@ · IA ao vivo"
+          }
+        }
+      }
+    },
+    "Following %@ · rel. %@ · Live AI" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following %@ · rel. %@ · Live AI"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiendo %@ · rel. %@ · IA en vivo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suit %@ · rel. %@ · IA live"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguindo %@ · rel. %@ · IA ao vivo"
+          }
+        }
+      }
+    },
+    "Following live — key, scale & modes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following live — key, scale & modes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiendo en vivo — tonalidad, escala y modos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suivi en direct — tonalité, gamme et modes"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguindo ao vivo — tom, escala e modos"
+          }
+        }
+      }
+    },
+    "Following live — mic + your chords" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following live — mic + your chords"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiendo en vivo — micrófono + tus acordes"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suivi en direct — micro + vos accords"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguindo ao vivo — microfone + seus acordes"
+          }
+        }
+      }
+    },
+    "Following live — updates as you modulate" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Following live — updates as you modulate"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Siguiendo en vivo — se actualiza si modulas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suivi en direct — se met à jour si vous modulez"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguindo ao vivo — atualiza se você modular"
+          }
+        }
+      }
+    },
     "Following the host · your view" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -12150,6 +12378,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hardware e tela"
+          }
+        }
+      }
+    },
+    "harmonic minor" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "harmonic minor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor armónica"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mineur harmonique"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor harmônica"
           }
         }
       }
@@ -14638,6 +14894,7 @@
     },
     "Key · AI listening" : {
       "comment" : "Compact key control while Auto-key has not committed a tonic yet. Must not include a letter name.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -14661,6 +14918,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tom · AI ouvindo"
+          }
+        }
+      }
+    },
+    "Key · Live AI" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key · Live AI"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tonalidad · IA en vivo"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tonalité · IA live"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tom · IA ao vivo"
           }
         }
       }
@@ -14725,6 +15010,7 @@
     },
     "Key %@ · AI" : {
       "comment" : "A label for the key control, showing the key name and that the app is using AI to detect the key.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -14899,6 +15185,7 @@
     },
     "Key of %@ · AI" : {
       "comment" : "A label displaying the key of the current song. The argument is the key of the song.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -15810,6 +16097,7 @@
     },
     "Listening for chords…" : {
       "comment" : "A label that appears when the app is listening for chords to determine the key.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -15833,6 +16121,63 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ouvindo acordes…"
+          }
+        }
+      }
+    },
+    "Listening for key & scale…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening for key & scale…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escuchando tonalidad y escala…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écoute de la tonalité et de la gamme…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvindo tom e escala…"
+          }
+        }
+      }
+    },
+    "Listening for key…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening for key…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escuchando la tonalidad…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écoute de la tonalité…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvindo a tonalidade…"
           }
         }
       }
@@ -15862,6 +16207,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ouvindo a banda — salve quando a bateria travar para capturar as partes aprendidas"
+          }
+        }
+      }
+    },
+    "Listening to the room and your chords…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening to the room and your chords…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escuchando el ambiente y tus acordes…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Écoute de la pièce et de vos accords…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvindo o ambiente e seus acordes…"
           }
         }
       }
@@ -16029,6 +16402,149 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Live Activity"
+          }
+        }
+      }
+    },
+    "Live AI detects tonic + scale/mode (major, minor, Dorian, Mixolydian, pentatonic, blues…). Mic leads; chords confirm. Use Re-listen if it sticks." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live AI detects tonic + scale/mode (major, minor, Dorian, Mixolydian, pentatonic, blues…). Mic leads; chords confirm. Use Re-listen if it sticks."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La IA en vivo detecta tónica + escala/modo (mayor, menor, Dórico, Mixolidio, pentatónica, blues…). El micrófono manda; los acordes confirman. Usa Reescuchar si se traba."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’IA live détecte tonique + gamme/mode (majeur, mineur, Dorien, Mixolydien, pentatonique, blues…). Le micro mène ; les accords confirment. Utilisez Réécouter si ça bloque."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A IA ao vivo detecta tônica + escala/modo (maior, menor, Dórico, Mixolídio, pentatônica, blues…). O microfone manda; os acordes confirmam. Use Ouvir de novo se travar."
+          }
+        }
+      }
+    },
+    "Live AI follows your progressions in real time and updates when you change key." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live AI follows your progressions in real time and updates when you change key."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La IA en vivo sigue tus progresiones en tiempo real y se actualiza cuando cambias de tonalidad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’IA live suit vos progressions en temps réel et se met à jour quand vous changez de tonalité."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A IA ao vivo segue suas progressões em tempo real e atualiza quando você muda de tom."
+          }
+        }
+      }
+    },
+    "Live AI listens like Auto-Key — mic chroma leads, your chords confirm or correct. Use Re-listen if it sticks." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live AI listens like Auto-Key — mic chroma leads, your chords confirm or correct. Use Re-listen if it sticks."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La IA en vivo escucha como Auto-Key: el micrófono manda; tus acordes confirman o corrigen. Usa Reescuchar si se traba."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’IA live écoute comme Auto-Key : le micro mène ; vos accords confirment ou corrigent. Utilisez Réécouter si ça bloque."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A IA ao vivo ouve como o Auto-Key: o microfone manda; seus acordes confirmam ou corrigem. Use Ouvir de novo se travar."
+          }
+        }
+      }
+    },
+    "Live AI listens to the mic and your chords in real time, and updates when the key changes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live AI listens to the mic and your chords in real time, and updates when the key changes."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La IA en vivo escucha el micrófono y tus acordes en tiempo real, y se actualiza cuando cambia la tonalidad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’IA live écoute le micro et vos accords en temps réel, et se met à jour quand la tonalité change."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A IA ao vivo ouve o microfone e seus acordes em tempo real, e atualiza quando o tom muda."
+          }
+        }
+      }
+    },
+    "Live AI watches the last few chords continuously. Change song or key and it should follow — use Re-listen if it sticks." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live AI watches the last few chords continuously. Change song or key and it should follow — use Re-listen if it sticks."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La IA en vivo observa los últimos acordes sin parar. Cambia de canción o tonalidad y debería seguirte — usa Reescuchar si se queda trabada."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’IA live surveille en continu les derniers accords. Changez de chanson ou de tonalité et elle devrait suivre — utilisez Réécouter si elle reste bloquée."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A IA ao vivo observa os últimos acordes sem parar. Mude de música ou tom e ela deve seguir — use Ouvir de novo se travar."
           }
         }
       }
@@ -16797,6 +17313,34 @@
         }
       }
     },
+    "Locrian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locrian"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locrio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locrien"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lócrio"
+          }
+        }
+      }
+    },
     "Long root on 1, fifth on 3 — very slow songs" : {
       "comment" : "Subtitle for the bass accompaniment style \"Slow ballad\".",
       "extractionState" : "stale",
@@ -16942,6 +17486,34 @@
     "Louder" : {
       "comment" : "Quick band message symbol for increasing the volume.",
       "isCommentAutoGenerated" : true
+    },
+    "Lydian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lydian"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lidio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lydien"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lídio"
+          }
+        }
+      }
     },
     "Lyric line" : {
       "localizations" : {
@@ -17256,6 +17828,90 @@
         }
       }
     },
+    "maj" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "maj"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "may"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "maj"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mai"
+          }
+        }
+      }
+    },
+    "major" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "major"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mayor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "majeur"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "maior"
+          }
+        }
+      }
+    },
+    "major pentatonic" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "major pentatonic"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatónica mayor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatonique majeure"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatônica maior"
+          }
+        }
+      }
+    },
     "Manual" : {
       "localizations" : {
         "en" : {
@@ -17366,6 +18022,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Marcar erro no ensaio"
+          }
+        }
+      }
+    },
+    "melodic minor" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "melodic minor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor melódica"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mineur mélodique"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor melódica"
           }
         }
       }
@@ -17886,6 +18570,34 @@
       "comment" : "Name of a rehearsal service template.",
       "isCommentAutoGenerated" : true
     },
+    "min" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "min"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "men"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "min"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "men"
+          }
+        }
+      }
+    },
     "Minimal stage view" : {
       "localizations" : {
         "en" : {
@@ -17910,6 +18622,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visualização mínima de palco"
+          }
+        }
+      }
+    },
+    "minor pentatonic" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "minor pentatonic"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatónica menor"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatonique mineure"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pentatônica menor"
           }
         }
       }
@@ -18054,6 +18794,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cifras em PDF ausentes"
+          }
+        }
+      }
+    },
+    "Mixolydian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixolydian"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixolidio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixolydien"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mixolídio"
           }
         }
       }
@@ -18662,6 +19430,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Números Nashville"
+          }
+        }
+      }
+    },
+    "natural minor" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "natural minor"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor natural"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mineur naturel"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "menor natural"
           }
         }
       }
@@ -19426,6 +20222,34 @@
         }
       }
     },
+    "No fixed lock in Auto — play chords and Live AI keeps following. Use Manual only to freeze a key." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No fixed lock in Auto — play chords and Live AI keeps following. Use Manual only to freeze a key."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En Auto no hay bloqueo fijo — toca acordes y la IA en vivo sigue. Usa Manual solo para fijar una tonalidad."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de verrouillage fixe en Auto — jouez des accords et l’IA live continue de suivre. Utilisez Manuel seulement pour figer une tonalité."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sem trava fixa no Auto — toque acordes e a IA ao vivo continua seguindo. Use Manual só para fixar um tom."
+          }
+        }
+      }
+    },
     "No guests connected yet" : {
       "comment" : "Text displayed in a checklist item when there are no connected peers.",
       "localizations" : {
@@ -19485,6 +20309,7 @@
       }
     },
     "No key picker in Auto — play at least three chords on piano or MIDI and the AI sets the key." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -21300,6 +22125,34 @@
         }
       }
     },
+    "Phrygian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phrygian"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frigio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phrygien"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frígio"
+          }
+        }
+      }
+    },
     "Piano" : {
       "localizations" : {
         "en" : {
@@ -21694,6 +22547,7 @@
     },
     "Play at least three chords — AI picks the key and learns when you switch to Manual to correct it." : {
       "comment" : "A description of the automatic key selection feature.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -22971,6 +23825,34 @@
         }
       }
     },
+    "Re-listen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-listen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reescuchar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réécouter"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ouvir de novo"
+          }
+        }
+      }
+    },
     "Re-parse Text" : {
       "comment" : "A button that triggers a re-parsing of the lyrics text.",
       "localizations" : {
@@ -23718,6 +24600,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ensaie com o anel e o metrônomo."
+          }
+        }
+      }
+    },
+    "rel. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rel. %@"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rel. %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rel. %@"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rel. %@"
           }
         }
       }
@@ -30327,8 +31237,37 @@
         }
       }
     },
+    "To freeze a key yourself, choose Manual above." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To freeze a key yourself, choose Manual above."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para fijar la tonalidad tú mismo, elige Manual arriba."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pour figer la tonalité vous-même, choisissez Manuel ci-dessus."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para fixar o tom você mesmo, escolha Manual acima."
+          }
+        }
+      }
+    },
     "To set the key yourself, choose Manual above." : {
       "comment" : "A description of how to set the key manually.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -32296,6 +33235,35 @@
     "Watch-face dial: beats on the rim, progression around, current chord in the center." : {
       "comment" : "A description of the watch-face dial style of the live view.",
       "isCommentAutoGenerated" : true
+    },
+    "Watching your progressions in real time…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watching your progressions in real time…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Observando tus progresiones en tiempo real…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suivi de vos progressions en temps réel…"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Observando suas progressões em tempo real…"
+          }
+        }
+      }
     },
     "We added a Verse — adjust in Lyrics & Sections if needed." : {
       "comment" : "Additional message to display when a Verse ring was added during import.",

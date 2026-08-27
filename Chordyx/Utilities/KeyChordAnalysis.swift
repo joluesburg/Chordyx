@@ -16,34 +16,67 @@ enum KeyChordAnalysis: Sendable {
     ]
 
     /// True when the held voicing looks like a real chord (not a melody single note).
-    /// Single pitch-classes were being fed into Auto-key as fake "E"/"D" majors and locking early.
+    /// Major triads often label as bare letters ("C", "G") — those count when ≥3 pitch classes.
     static func isChordVoicing(pitchClassCount: Int, symbol: String) -> Bool {
         guard pitchClassCount >= 2, let parsed = Transposer.parse(symbol) else { return false }
-        let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        // Bare letters are melody / incomplete clusters (D–E–G falling back to "D") — never chords.
-        if suffix.isEmpty { return false }
-        if pitchClassCount >= 3 { return true }
-        // Power chords / suspensions / explicit qualities count; bare letter dyads do not.
+        let suffix = parsed.suffix
+            .split(separator: "/", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        // Bare letter with a full triad/seventh voicing under the fingers = major (or incomplete label).
+        if suffix.isEmpty {
+            return pitchClassCount >= 3
+        }
+        // Any explicit quality with ≥2 distinct pitch classes counts (incl. power / sus / m7).
         return true
     }
 
-    /// True triad / seventh quality (not power-chord "5" or bare letter) — strengthens Auto-key evidence.
+    /// True triad / seventh / major-letter quality — strengthens Auto-key evidence.
+    /// Bare letters are treated as major triads (MIDI controllers emit "C" for C–E–G).
     static func hasTriadOrSeventhQuality(_ symbol: String) -> Bool {
         guard let parsed = Transposer.parse(symbol) else { return false }
-        let suffix = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if suffix.isEmpty { return false }
+        let suffix = parsed.suffix
+            .split(separator: "/", maxSplits: 1)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
         // Power chords alone are too weak / scale-like to unlock Auto-key by themselves.
         if suffix == "5" { return false }
         return true
     }
 
-        /// Power chords and sus are valid live evidence when the host plays guitar.
+    /// Power chords and sus are valid live evidence when the host plays guitar.
+    /// Piano majors (bare letter + ≥3 PCs) and inversions (C/E) always count.
     static func contributesToLiveKeyEvidence(symbol: String, pitchClassCount: Int, guitarMode: Bool) -> Bool {
         if isChordVoicing(pitchClassCount: pitchClassCount, symbol: symbol) { return true }
         guard guitarMode, pitchClassCount >= 2 else { return false }
         let normalized = LiveRing.normalize(symbol)
         if normalized.hasSuffix("5") || normalized.contains("sus") { return true }
         return false
+    }
+
+    /// Build an Auto-key evidence symbol that keeps slash-bass inversions when MIDI provides them.
+    static func keyEvidenceSymbol(
+        displaySymbol: String,
+        noteIndices: [Int],
+        preferFlats: Bool
+    ) -> String {
+        let trimmed = displaySymbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        guard let bassPC = noteIndices.min().map({ PianoNote.pitchClass(forStored: $0) }),
+              let parsed = Transposer.parse(LiveRing.normalize(trimmed)),
+              let rootPC = Transposer.pitchClass(ofRoot: parsed.root),
+              bassPC != rootPC else {
+            return trimmed
+        }
+        // Already has inversion spelling.
+        if trimmed.contains("/") { return trimmed }
+        let names = preferFlats ? Transposer.flatNames : Transposer.sharpNames
+        let quality = LiveRing.normalize(trimmed)
+        return "\(quality)/\(names[bassPC])"
     }
 
     /// Enough ordered chord evidence to announce a key.
@@ -80,10 +113,26 @@ enum KeyChordAnalysis: Sendable {
             return true
         }
 
+        // Clear V→I / IV→I / ii–V–I arrival (e.g. …Am D G) — don't wait for 8 chords
+        // while the UI still shows the default Do/C letter.
+        if authenticDominantCadenceDestination(in: normalized) != nil, distinctRoots.count >= 3 {
+            return true
+        }
+        if majorCadenceDestination(in: normalized) != nil, distinctRoots.count >= 3, normalized.count >= 7 {
+            return true
+        }
+        // Fmaj7 + Gm7 + … + C7 — I/V7 jazz-worship set on the pad is enough evidence.
+        if establishedMajorTonicFromIAndV7(in: normalized) != nil, distinctRoots.count >= 3 {
+            return true
+        }
+        // D G A / D Bm G A — major family is enough; don't wait while Mi is stuck on screen.
+        if establishedMajorFamilyTonic(in: normalized) != nil, distinctRoots.count >= 3 {
+            return true
+        }
+
         // Fallback for irregular phrases: enough length + cadence / established tonic.
         guard normalized.count >= 8 else { return false }
         if establishedMinorTonic(in: normalized) != nil { return true }
-        if majorCadenceDestination(in: normalized) != nil { return true }
         if distinctRoots.count >= 3 { return true }
         return false
     }
@@ -226,15 +275,31 @@ enum KeyChordAnalysis: Sendable {
             return worshipKey
         }
 
+        // 0b) Major family I+IV+V(+vi) — D G A Bm → D before any MIR/audio can invent E/Mi.
+        if let tonicPC = establishedMajorFamilyTonic(in: normalized),
+           let key = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return key
+        }
+
+        // 0c) I + V7 evidence (Fmaj7…C7 → F) beats relative/false letters like E/Mi.
+        if let tonicPC = establishedMajorTonicFromIAndV7(in: normalized),
+           let key = MusicalKey.allCases.first(where: { $0.pitchClass == tonicPC }) {
+            return key
+        }
+
         let tones = chordTones(from: normalized)
 
-        // 1) Clear major cadence destination always wins over stray minor/ii noise.
+        // 1) Authentic V→I always wins (Am–D–…–D–G → G, never relative C).
+        if let majorI = authenticDominantCadenceDestination(in: normalized),
+           let key = MusicalKey.allCases.first(where: { $0.pitchClass == majorI }) {
+            return key
+        }
+        // Soft: broader cadence (incl. IV→I) only when scores already lean that way.
         if let majorI = majorCadenceDestination(in: normalized),
            let key = MusicalKey.allCases.first(where: { $0.pitchClass == majorI }) {
             let majorScore = scores[key] ?? 0
             let bestScore = scores[currentBest] ?? 0
-            let lastRoot = tones.last?.root
-            if key == currentBest || majorScore >= bestScore * 0.55 || lastRoot == majorI {
+            if key == currentBest || majorScore >= bestScore * 0.55 {
                 return key
             }
         }
@@ -268,7 +333,215 @@ enum KeyChordAnalysis: Sendable {
 
     /// Live Auto-key veto for candidates that fight the heard progression.
     static func isImplausibleLiveKeyCandidate(symbols: [String], candidate: MusicalKey) -> Bool {
-        isImplausibleAgainstMinorTonic(symbols: symbols, candidate: candidate)
+        if isImplausibleAgainstMajorFamily(symbols: symbols, candidate: candidate) {
+            return true
+        }
+        if isImplausibleAgainstEstablishedMajorTonic(symbols: symbols, candidate: candidate) {
+            return true
+        }
+        if isImplausibleAgainstMajorCadence(symbols: symbols, candidate: candidate) {
+            return true
+        }
+        return isImplausibleAgainstMinorTonic(symbols: symbols, candidate: candidate)
+    }
+
+    /// D–G–A / D–Bm–G–A → Re. Reject Mi/E and every letter that isn't D or its relative minor.
+    static func isImplausibleAgainstMajorFamily(
+        symbols: [String],
+        candidate: MusicalKey
+    ) -> Bool {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard let tonic = establishedMajorFamilyTonic(in: normalized) else { return false }
+        if candidate.pitchClass == tonic { return false }
+        let relativeMinor = (tonic + 9) % 12
+        if candidate.pitchClass == relativeMinor { return false }
+        return true
+    }
+
+    /// I + IV + V (and optional vi) with plain major V — the worship / pop family that
+    /// never needed a dominant-seventh to be obvious (D G A Bm → D, never E).
+    static func establishedMajorFamilyTonic(in symbols: [String]) -> Int? {
+        let tones = chordTonesDetailed(from: symbols)
+        guard tones.count >= 3 else { return nil }
+
+        var majorHits = [Int: Int]()
+        var minorHits = [Int: Int]()
+        var dominantRoots = Set<Int>()
+        for tone in tones {
+            if tone.isDominantSeventh {
+                // V7 never counts as a tonic I candidate (C7 is V of F, not tonic C).
+                dominantRoots.insert(tone.root)
+                continue
+            }
+            if tone.isSolidMajorTonic {
+                majorHits[tone.root, default: 0] += 2
+            } else if tone.isMajorFamily {
+                majorHits[tone.root, default: 0] += 1
+            } else if tone.isMinorFamily {
+                minorHits[tone.root, default: 0] += 1
+            }
+        }
+
+        var best: (tonic: Int, score: Int)?
+        for tonic in 0..<12 {
+            let iHits = majorHits[tonic] ?? 0
+            guard iHits >= 1 else { continue }
+            let iv = (tonic + 5) % 12
+            let v = (tonic + 7) % 12
+            let ii = (tonic + 2) % 12
+            let iii = (tonic + 4) % 12
+            let vi = (tonic + 9) % 12
+            let hasIV = (majorHits[iv] ?? 0) >= 1
+            let hasV = (majorHits[v] ?? 0) >= 1 || dominantRoots.contains(v)
+            let hasII = (minorHits[ii] ?? 0) >= 1
+            let hasIII = (minorHits[iii] ?? 0) >= 1
+            let hasVI = (minorHits[vi] ?? 0) >= 1
+
+            // Must hear V (or V7). I+IV+vi without V is too ambiguous (Am D Bm Em G looks like D).
+            guard hasV else { continue }
+            // Plus at least one more diatonic pillar.
+            guard hasIV || hasII || hasVI else { continue }
+
+            var score = iHits * 3
+            if hasV { score += 4 }
+            if hasIV { score += 3 }
+            if hasII { score += 2 }
+            if hasVI { score += 1 }
+            if hasIII { score += 1 }
+            if dominantRoots.contains(v) { score += 2 }
+            if score >= 9, best == nil || score > best!.score {
+                best = (tonic, score)
+            }
+        }
+        return best?.tonic
+    }
+
+    /// Fmaj7 + C7 (I + V7) → Fa. Reject Mi/E and other distant letters.
+    static func isImplausibleAgainstEstablishedMajorTonic(
+        symbols: [String],
+        candidate: MusicalKey
+    ) -> Bool {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard let tonic = establishedMajorTonicFromIAndV7(in: normalized) else { return false }
+        if candidate.pitchClass == tonic { return false }
+        let relativeMinor = (tonic + 9) % 12
+        if candidate.pitchClass == relativeMinor { return false }
+        return true
+    }
+
+    /// Clear I / Imaj7 plus V7 (or V) of that tonic in the phrase — worship / jazz jam lock.
+    static func establishedMajorTonicFromIAndV7(in symbols: [String]) -> Int? {
+        let tones = chordTonesDetailed(from: symbols)
+        guard tones.count >= 3 else { return nil }
+
+        var tonicStrength = [Int: Int]()
+        var hasV7 = Set<Int>()
+        var hasV = Set<Int>()
+
+        for tone in tones {
+            // Dom7 on a root is V7 of something — never treat it as that root's tonic I.
+            if tone.isDominantSeventh {
+                let tonic = (tone.root + 5) % 12
+                hasV7.insert(tonic)
+                continue
+            }
+            if tone.isSolidMajorTonic {
+                tonicStrength[tone.root, default: 0] += 3
+            } else if tone.isMajorFamily {
+                // sus / ambiguous major-ish — weak tonic evidence only.
+                tonicStrength[tone.root, default: 0] += 1
+                let asVOf = (tone.root + 5) % 12
+                hasV.insert(asVOf)
+            }
+            if tone.isMinorFamily {
+                // counted below as ii / iii / vi support
+            }
+        }
+
+        var best: (tonic: Int, score: Int)?
+        for (tonic, strength) in tonicStrength where strength >= 2 {
+            var score = strength
+            if hasV7.contains(tonic) { score += 6 }
+            else if hasV.contains(tonic) { score += 2 }
+            else { continue }
+            let hasII = tones.contains { $0.isMinorFamily && ($0.root - tonic + 12) % 12 == 2 }
+            let hasIII = tones.contains { $0.isMinorFamily && ($0.root - tonic + 12) % 12 == 4 }
+            let hasIV = tones.contains { $0.isSolidMajorTonic && ($0.root - tonic + 12) % 12 == 5 }
+            let hasVI = tones.contains { $0.isMinorFamily && ($0.root - tonic + 12) % 12 == 9 }
+            if hasII { score += 2 }
+            if hasIII { score += 1 }
+            if hasIV { score += 1 }
+            if hasVI { score += 1 }
+            // Prefer the tonic that actually received V7 (Fmaj7+C7 → F, not G from D7 alone).
+            if hasV7.contains(tonic) { score += 2 }
+            if score >= 8, best == nil || score > best!.score {
+                best = (tonic, score)
+            }
+        }
+        return best?.tonic
+    }
+
+    private struct DetailedTone: Sendable {
+        let root: Int
+        let isMinorFamily: Bool
+        let isMajorFamily: Bool
+        let isSolidMajorTonic: Bool
+        let isDominantSeventh: Bool
+    }
+
+    private static func chordTonesDetailed(from symbols: [String]) -> [DetailedTone] {
+        symbols.compactMap { symbol -> DetailedTone? in
+            // Analyze quality on the chord body; keep bass PC available for inversion weight.
+            let body = LiveRing.normalize(symbol)
+            guard let parsed = Transposer.parse(body),
+                  let root = Transposer.pitchClass(ofRoot: parsed.root) else { return nil }
+            let s = parsed.suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let isMinor = s.hasPrefix("m") && !s.hasPrefix("maj")
+            let isDom7 = !isMinor && !s.hasPrefix("maj") && (
+                s == "7"
+                    || (s.hasPrefix("7") && !s.contains("sus"))
+                    || s.hasPrefix("9")
+                    || s.hasPrefix("11")
+                    || s.hasPrefix("13")
+                    || s == "dom7"
+            )
+            let isSus = s.contains("sus")
+            let isSolidMajor = !isMinor && !isDom7 && !isSus && (
+                s.isEmpty || s.hasPrefix("maj") || s.hasPrefix("add") || s == "6" || s == "6/9"
+            )
+            let isMajorFamily = !isMinor && (isSolidMajor || isSus || isDom7 || s == "5")
+            return DetailedTone(
+                root: root,
+                isMinorFamily: isMinor,
+                isMajorFamily: isMajorFamily,
+                isSolidMajorTonic: isSolidMajor,
+                isDominantSeventh: isDom7
+            )
+        }
+    }
+
+    /// Reject Do/C when the phrase clearly cadences elsewhere (…D→G → Sol, not Do).
+    /// Only authentic V→I (not IV→I / plagal) — Am F C G must still be allowed as C.
+    static func isImplausibleAgainstMajorCadence(symbols: [String], candidate: MusicalKey) -> Bool {
+        let normalized = symbols.map { LiveRing.normalize($0) }.filter { !$0.isEmpty }
+        guard let majorI = authenticDominantCadenceDestination(in: normalized) else { return false }
+        if candidate.pitchClass == majorI { return false }
+        // Relative minor of the cadence tonic is still plausible (Em for G).
+        let relativeMinor = (majorI + 9) % 12
+        if candidate.pitchClass == relativeMinor { return false }
+        return true
+    }
+
+    /// V→I only (penultimate is dominant of the final major chord).
+    static func authenticDominantCadenceDestination(in symbols: [String]) -> Int? {
+        let tones = chordTones(from: symbols)
+        guard tones.count >= 2, let last = tones.last, !last.isMinor else { return nil }
+        let prev = tones[tones.count - 2]
+        guard !prev.isMinor else { return nil }
+        let interval = (last.root - prev.root + 12) % 12
+        // Perfect 4th up from V → I (D→G, G→C, A→D, …).
+        guard interval == 5 else { return nil }
+        return last.root
     }
 
     /// Reject keys that fight a clear minor tonic (Dm playing must never announce E/Mi).

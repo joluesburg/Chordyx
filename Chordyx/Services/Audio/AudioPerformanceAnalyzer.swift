@@ -27,8 +27,10 @@ final class AudioPerformanceAnalyzer {
     private(set) var inputLevel: Float = 0
     private(set) var availableInputDevices: [AudioInputDevice] = []
     private(set) var estimatedAudioKey: MusicalKey?
+    private(set) var estimatedAudioScale: MusicalScaleQuality = .major
     private(set) var audioKeyConfidence: Double = 0
     private(set) var audioKeyScores: [MusicalKey: Double] = [:]
+    private(set) var estimatedAudioRelativeKey: MusicalKey?
 
     private var captureStorage: AudioInputCapture?
     private var capture: AudioInputCapture {
@@ -113,9 +115,21 @@ final class AudioPerformanceAnalyzer {
         detectedClave = .unknown
         lastStyleProbabilities = [:]
         estimatedAudioKey = nil
+        estimatedAudioScale = .major
         audioKeyConfidence = 0
         audioKeyScores = [:]
+        estimatedAudioRelativeKey = nil
         lastUIPublishTime = 0
+    }
+
+    /// Clear chroma memory so Auto-key can re-listen after a stuck / wrong letter.
+    func resetAudioKeyEstimate() {
+        chromaKeyEstimator.reset()
+        estimatedAudioKey = nil
+        estimatedAudioScale = .major
+        audioKeyConfidence = 0
+        audioKeyScores = [:]
+        estimatedAudioRelativeKey = nil
     }
 
     nonisolated private func process(buffer: AVAudioPCMBuffer, at time: TimeInterval) {
@@ -143,25 +157,35 @@ final class AudioPerformanceAnalyzer {
                 self.recentFeatures.removeFirst(self.recentFeatures.count - self.maxFeatureHistory)
             }
 
-            let now = Date().timeIntervalSince1970
-            guard now - self.lastUIPublishTime >= self.uiPublishInterval else { return }
-            self.lastUIPublishTime = now
-
-            self.inputLevel = peakRMS
-            self.estimatedBPM = bpm
-            self.tempoConfidence = tempoConf
-            self.syncopationIndex = syncopation
-            self.onsetDensityPerSecond = onsetDensity
-            self.isTracking = (bpm != nil) || peakRMS > 0.006
-
+            // Auto-key is audio-first — publish chroma key every frame batch, not only on UI cadence.
+            let previousKey = self.estimatedAudioKey
+            let previousConfidence = self.audioKeyConfidence
             if let keyEstimate {
                 self.estimatedAudioKey = keyEstimate.key
+                self.estimatedAudioScale = keyEstimate.scale
                 self.audioKeyConfidence = keyEstimate.confidence
                 self.audioKeyScores = keyEstimate.scores
+                self.estimatedAudioRelativeKey = keyEstimate.relativeKey
             }
+            let keyMoved = previousKey != self.estimatedAudioKey
+                || abs(previousConfidence - self.audioKeyConfidence) >= 0.04
 
-            self.classifyStyle()
-            self.onAnalysisUpdated?()
+            let now = Date().timeIntervalSince1970
+            if now - self.lastUIPublishTime >= self.uiPublishInterval {
+                self.lastUIPublishTime = now
+                self.inputLevel = peakRMS
+                self.estimatedBPM = bpm
+                self.tempoConfidence = tempoConf
+                self.syncopationIndex = syncopation
+                self.onsetDensityPerSecond = onsetDensity
+                self.isTracking = (bpm != nil) || peakRMS > 0.006
+                self.classifyStyle()
+                self.onAnalysisUpdated?()
+            } else if keyMoved {
+                self.inputLevel = peakRMS
+                self.isTracking = (bpm != nil) || peakRMS > 0.006
+                self.onAnalysisUpdated?()
+            }
         }
     }
 

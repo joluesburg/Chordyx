@@ -440,7 +440,7 @@ struct HostSetupMusicalKeyCard: View {
                     Text(String(localized: "Auto-detect key"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppTheme.textPrimary)
-                    Text(String(localized: "AI learns the key from your chord playing once the session starts."))
+                    Text(String(localized: "Live AI listens to the mic and your chords in real time, and updates when the key changes."))
                         .font(.caption)
                         .foregroundStyle(AppTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -454,7 +454,7 @@ struct HostSetupMusicalKeyCard: View {
                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
             }
 
-            Text(String(localized: "No key picker in Auto — play at least three chords on piano or MIDI and the AI sets the key."))
+            Text(String(localized: "No fixed lock in Auto — play chords and Live AI keeps following. Use Manual only to freeze a key."))
                 .font(.caption2)
                 .foregroundStyle(AppTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -527,27 +527,56 @@ struct SessionMusicalKeyPicker: View {
                     .font(.system(size: 44, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
 
-                Label(String(localized: "Detected from your playing"), systemImage: "checkmark.circle.fill")
+                if let scaleCaption = viewModel.autoKeyScaleCaption(isGuest: false) {
+                    Text(scaleCaption)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AppTheme.accentSecondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                if let scale = viewModel.payload.detectedScale {
+                    Text(scalePitchClassLine(
+                        key: viewModel.payload.key,
+                        scale: scale
+                    ))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                }
+
+                Label(String(localized: "Following live — key, scale & modes"), systemImage: "arrow.triangle.2.circlepath")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.accentSecondary)
+
+                Button {
+                    viewModel.releaseAutoKeyFollow()
+                } label: {
+                    Label(String(localized: "Re-listen"), systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: 220)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
+                .tint(AppTheme.accent)
             } else {
-                Text(String(localized: "Detecting key…"))
+                Text(String(localized: "Listening for key & scale…"))
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
                     .foregroundStyle(AppTheme.textPrimary)
                     .multilineTextAlignment(.center)
 
-                Label(String(localized: "Listening for chords…"), systemImage: "waveform")
+                Label(String(localized: "Listening to the room and your chords…"), systemImage: "waveform")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.textSecondary)
             }
 
-            Text(String(localized: "Play at least three chords — AI picks the key and learns when you switch to Manual to correct it."))
+            Text(String(localized: "Live AI detects tonic + scale/mode (major, minor, Dorian, Mixolydian, pentatonic, blues…). Mic leads; chords confirm. Use Re-listen if it sticks."))
                 .font(.caption)
                 .foregroundStyle(AppTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
-            Text(String(localized: "To set the key yourself, choose Manual above."))
+            Text(String(localized: "To freeze a key yourself, choose Manual above."))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(AppTheme.textSecondary.opacity(0.9))
                 .multilineTextAlignment(.center)
@@ -555,6 +584,17 @@ struct SessionMusicalKeyPicker: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+    }
+
+    private func scalePitchClassLine(
+        key: MusicalKey,
+        scale: MusicalScaleQuality
+    ) -> String {
+        let names = key.prefersFlats ? Transposer.flatNames : Transposer.sharpNames
+        let degrees = scale.intervals.map { interval in
+            names[(key.pitchClass + interval) % 12]
+        }
+        return degrees.joined(separator: " · ")
     }
 
     private var manualKeyPanel: some View {

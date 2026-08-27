@@ -383,6 +383,10 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
     var autoDetectKey: Bool = true
     /// True when the current key was chosen by auto-detection (shown in the UI).
     var isKeyAutoDetected: Bool = false
+    /// Detected scale / mode alongside Auto AI key (major, Dorian, blues, …).
+    var detectedScale: MusicalScaleQuality? = nil
+    /// Relative major/minor letter when Auto AI reports one.
+    var detectedRelativeKey: MusicalKey? = nil
     /// Internet backup via iCloud — works over cellular when local Wi‑Fi fails.
     var isRemoteBackupEnabled: Bool = true
     /// Short code guests can enter to follow the session over the Internet.
@@ -518,6 +522,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
             freestyleChordSymbols: freestyleChordSymbols,
             key: key,
             isKeyAutoDetected: isKeyAutoDetected,
+            detectedScale: detectedScale,
+            detectedRelativeKey: detectedRelativeKey,
             isPianoActive: isPianoActive
         )
     }
@@ -529,6 +535,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         merged.freestyleChordSymbols = wire.freestyleChordSymbols
         merged.key = wire.key
         merged.isKeyAutoDetected = wire.isKeyAutoDetected
+        merged.detectedScale = wire.detectedScale
+        merged.detectedRelativeKey = wire.detectedRelativeKey
         merged.isPianoActive = wire.isPianoActive
         return merged
     }
@@ -565,6 +573,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         copy.liveRingSegments = []
         copy.key = .C
         copy.isKeyAutoDetected = false
+        copy.detectedScale = nil
+        copy.detectedRelativeKey = nil
         copy.beatsOnActiveChord = 0
         copy.isPianoActive = false
         copy.hasInferredLiveProgression = false
@@ -590,6 +600,8 @@ struct SessionSyncPayload: Codable, Equatable, Sendable {
         merged.liveRingSegments = received.liveRingSegments
         merged.key = received.key
         merged.isKeyAutoDetected = received.isKeyAutoDetected
+        merged.detectedScale = received.detectedScale
+        merged.detectedRelativeKey = received.detectedRelativeKey
         merged.beatsOnActiveChord = received.beatsOnActiveChord
         merged.isPianoActive = received.isPianoActive
         merged.hasInferredLiveProgression = received.hasInferredLiveProgression
@@ -637,6 +649,8 @@ struct LiveChordWire: Codable, Sendable, Equatable {
     var freestyleChordSymbols: [String]
     var key: MusicalKey
     var isKeyAutoDetected: Bool
+    var detectedScale: MusicalScaleQuality?
+    var detectedRelativeKey: MusicalKey?
     var isPianoActive: Bool
 }
 
@@ -730,7 +744,7 @@ enum ChordCatalog {
 
 /// Transposes chord symbols by a number of semitones while preserving the
 /// chord quality (the suffix after the root, e.g. "m7", "maj7", "7b5").
-enum Transposer {
+nonisolated enum Transposer {
     static let sharpNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     static let flatNames = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
@@ -1022,7 +1036,7 @@ enum ChordTheory {
 }
 
 /// Normalizes live-played chord symbols so duplicates and inversions collapse to one bubble.
-enum LiveRing {
+nonisolated enum LiveRing {
     /// Chords shown on the live ring (keeps the UI readable).
     static let maxDisplayChords = 6
     static let maxChordsPerRing = maxDisplayChords
